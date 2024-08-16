@@ -8,6 +8,7 @@
         <onpublish command="docmaster publish --root user/index --space PRODTECH --parent Pipeline\ Development\ Tools"/>
         </scripts><build>
         <file sourcepath="src/comfyui_remote" packagepath="python/comfyui_remote" recursive="1" pattern="*.py"/>
+	<file sourcepath="src/nuke_rvm" packagepath="python/nuke_rvm" recursive="1" pattern="*.json"/>
         <file sourcepath="src/comfyui_remote.egg-info/*" packagepath="python/comfyui_remote.egg-info" generated="1"/>
     </build>
 </dnpkg>

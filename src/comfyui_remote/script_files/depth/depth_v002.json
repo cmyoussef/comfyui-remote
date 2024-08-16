@@ -1,0 +1,39 @@
+{
+  "5": {
+    "inputs": {
+      "ckpt_name": "depth_anything_vitl14.pth",
+      "resolution": 1024,
+      "image": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "DepthAnythingPreprocessor",
+    "_meta": {
+      "title": "Depth Anything"
+    }
+  },
+  "6": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "8": {
+    "inputs": {
+      "image": "deep_hdr11.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  }
+}
