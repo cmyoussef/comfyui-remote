@@ -1,0 +1,439 @@
+{
+  "2": {
+    "inputs": {
+      "ckpt_name": "SD_1_5/photon_v1.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "4": {
+    "inputs": {
+      "text": "hard light, photograph of a man, cinematic, high contrast",
+      "clip": [
+        "2",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "5": {
+    "inputs": {
+      "text": "bad quality, bad picture",
+      "clip": [
+        "2",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "samples": [
+        "132",
+        0
+      ],
+      "vae": [
+        "2",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "9": {
+    "inputs": {
+      "image": "CP_refFrame_v003.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "36": {
+    "inputs": {
+      "images": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "37": {
+    "inputs": {
+      "model_path": "IC-Light/iclight_sd15_fbc.safetensors",
+      "model": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LoadAndApplyICLightUnet",
+    "_meta": {
+      "title": "Load And Apply IC-Light"
+    }
+  },
+  "44": {
+    "inputs": {
+      "multiplier": 0.185,
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "5",
+        0
+      ],
+      "vae": [
+        "2",
+        2
+      ],
+      "foreground": [
+        "55",
+        0
+      ],
+      "opt_background": [
+        "85",
+        0
+      ]
+    },
+    "class_type": "ICLightConditioning",
+    "_meta": {
+      "title": "IC-Light Conditioning"
+    }
+  },
+  "55": {
+    "inputs": {
+      "pixels": [
+        "9",
+        0
+      ],
+      "vae": [
+        "2",
+        2
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "56": {
+    "inputs": {
+      "pixels": [
+        "80",
+        0
+      ],
+      "vae": [
+        "2",
+        2
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "57": {
+    "inputs": {
+      "light_position": "Left Light",
+      "multiplier": [
+        "82",
+        0
+      ],
+      "start_color": "#FFFFFF",
+      "end_color": "#000000",
+      "width": [
+        "151",
+        0
+      ],
+      "height": [
+        "151",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "LightSource",
+    "_meta": {
+      "title": "Simple Light Source"
+    }
+  },
+  "59": {
+    "inputs": {
+      "images": [
+        "80",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "74": {
+    "inputs": {
+      "light_position": "Right Light",
+      "multiplier": [
+        "82",
+        0
+      ],
+      "start_color": "#FFFFFF",
+      "end_color": "#000000",
+      "width": [
+        "151",
+        0
+      ],
+      "height": [
+        "151",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "LightSource",
+    "_meta": {
+      "title": "Simple Light Source"
+    }
+  },
+  "78": {
+    "inputs": {
+      "light_position": "Bottom Light",
+      "multiplier": [
+        "82",
+        0
+      ],
+      "start_color": "#FFFFFF",
+      "end_color": "#000000",
+      "width": [
+        "151",
+        0
+      ],
+      "height": [
+        "151",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "LightSource",
+    "_meta": {
+      "title": "Simple Light Source"
+    }
+  },
+  "79": {
+    "inputs": {
+      "light_position": "Top Light",
+      "multiplier": [
+        "82",
+        0
+      ],
+      "start_color": "#FFFFFF",
+      "end_color": "#000000",
+      "width": [
+        "151",
+        0
+      ],
+      "height": [
+        "151",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "LightSource",
+    "_meta": {
+      "title": "Simple Light Source"
+    }
+  },
+  "80": {
+    "inputs": {
+      "inputcount": 4,
+      "Update inputs": null,
+      "image_1": [
+        "57",
+        0
+      ],
+      "image_2": [
+        "74",
+        0
+      ],
+      "image_3": [
+        "78",
+        0
+      ],
+      "image_4": [
+        "79",
+        0
+      ]
+    },
+    "class_type": "ImageBatchMulti",
+    "_meta": {
+      "title": "Image Batch Multi"
+    }
+  },
+  "82": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "FloatConstant",
+    "_meta": {
+      "title": "LightMultiplier"
+    }
+  },
+  "83": {
+    "inputs": {
+      "sigma": 2,
+      "center_input_range": false,
+      "images": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "CalculateNormalsFromImages",
+    "_meta": {
+      "title": "Calculate Normals From Images"
+    }
+  },
+  "85": {
+    "inputs": {
+      "pixels": [
+        "87",
+        0
+      ],
+      "vae": [
+        "2",
+        2
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "87": {
+    "inputs": {
+      "images": [
+        "80",
+        0
+      ]
+    },
+    "class_type": "ImageNormalize_Neg1_To_1",
+    "_meta": {
+      "title": "Image Normalize -1 to 1"
+    }
+  },
+  "128": {
+    "inputs": {
+      "seed_behavior": "fixed",
+      "samples": [
+        "56",
+        0
+      ]
+    },
+    "class_type": "LatentBatchSeedBehavior",
+    "_meta": {
+      "title": "LatentBatchSeedBehavior"
+    }
+  },
+  "132": {
+    "inputs": {
+      "add_noise": true,
+      "noise_seed": 123,
+      "cfg": 2,
+      "model": [
+        "37",
+        0
+      ],
+      "positive": [
+        "44",
+        0
+      ],
+      "negative": [
+        "44",
+        1
+      ],
+      "sampler": [
+        "133",
+        0
+      ],
+      "sigmas": [
+        "144",
+        0
+      ],
+      "latent_image": [
+        "128",
+        0
+      ]
+    },
+    "class_type": "SamplerCustom",
+    "_meta": {
+      "title": "SamplerCustom"
+    }
+  },
+  "133": {
+    "inputs": {
+      "sampler_name": "dpm_2"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect"
+    }
+  },
+  "144": {
+    "inputs": {
+      "model_type": "SD1",
+      "steps": 20,
+      "denoise": 1
+    },
+    "class_type": "AlignYourStepsScheduler",
+    "_meta": {
+      "title": "AlignYourStepsScheduler"
+    }
+  },
+  "149": {
+    "inputs": {
+      "filename_prefix": "CP_normal",
+      "images": [
+        "83",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "150": {
+    "inputs": {
+      "images": [
+        "83",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "151": {
+    "inputs": {
+      "image": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "GetImageSize+",
+    "_meta": {
+      "title": "🔧 Get Image Size"
+    }
+  }
+}
