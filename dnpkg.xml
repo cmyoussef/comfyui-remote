@@ -1,0 +1,13 @@
+<dnpkg name="comfyui-remote">
+    <description>A serverless implementation for running ComfyUI workflows</description>
+    <scripts>
+        <prebuild command="env PACKAGE_NAME=@{PACKAGE_NAME} PACKAGE_VERSION_NAME=@{ID_FULL_VERSION} python setup.py egg_info"/>
+
+        <onpublish command="if (git diff --quiet HEAD --); then git tag v@{ID_FULL_VERSION}; git push origin v@{ID_FULL_VERSION}; else echo 'You should not publish a package with uncommitted changes'; exit 1; fi"/>
+        <onpublish command="docmaster release --version @{ID_FULL_VERSION} --latest"/>
+        <onpublish command="docmaster publish --root user/index --space PRODTECH --parent Pipeline\ Development\ Tools"/>
+        </scripts><build>
+        <file sourcepath="src/comfyui_remote" packagepath="python/comfyui_remote" recursive="1" pattern="*.py"/>
+        <file sourcepath="src/comfyui_remote.egg-info/*" packagepath="python/comfyui_remote.egg-info" generated="1"/>
+    </build>
+</dnpkg>
