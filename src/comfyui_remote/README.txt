@@ -1,1 +1,1 @@
-conda activate /tools/SITE/rnd/comfyUI/comfyui-1.0.3/
+conda activate /tools/SITE/rnd/comfyUI/comfyui-1.0.4/

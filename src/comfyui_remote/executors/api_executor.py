@@ -39,12 +39,13 @@ class ComfyConnector:
             cls._instance = super(ComfyConnector, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, json_file):
+    def __init__(self, json_file, comfyui_version):
         """
         Initializes the ComfyConnector, starting the API server if necessary.
         """
         if not hasattr(self, 'initialized'):
             self.json_file = json_file
+            self.comfyui_version = comfyui_version
             self.urlport = self.find_available_port()
             self.server_address = f"http://{settings_config.API_URL}:{self.urlport}"
             self.client_id = settings_config.INSTANCE_IDENTIFIER
@@ -63,7 +64,11 @@ class ComfyConnector:
     
     def start_api(self): # This method is used to start the API server
         if not self.is_api_running(): # Block execution until the API server is running
-            api_command_line = settings_config.API_COMMAND_LINE + f" --port {self.urlport}" # Add the port to the command line
+            if self.comfyui_version:
+                api_command_line = settings_config.API_COMMAND_LINE + f" --version {self.comfyui_version}" + f" --port {self.urlport}" # Add the port to the command line
+                print("api_command_line={}".format(api_command_line))
+            else:
+                api_command_line = settings_config.API_COMMAND_LINE + f" --port {self.urlport}" # Add the port to the command line
             if self._process is None or self._process.poll() is not None: # Check if the process is not running or has terminated for some reason
                 self._process = subprocess.Popen(api_command_line.split())
                 logger.info("API process started with PID:", self._process.pid)
@@ -184,7 +189,7 @@ class ComfyConnector:
     def find_output_node(json_object): # This method is used to find the node containing the SaveImage class in a prompt
         for key, value in json_object.items():
             if isinstance(value, dict):
-                if value.get("class_type") == "SaveImage":
+                if value.get("class_type") in {"SaveImage", "dnFileOut", "dnSaveImage"}:
                     return f"['{key}']"  # Return the key containing the SaveImage class
                 result = ComfyConnector.find_output_node(value)
                 if result:
