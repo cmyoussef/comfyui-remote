@@ -89,35 +89,44 @@ def modify_syndata_input(json_data: dict, new_rgb_input: str, new_depth_input: s
 
 def is_input_dir(json_data: dict) -> bool:
     # Track if input node takes a directory as input
-    return any(value["class_type"] == "VHS_LoadImagesPath" for value in json_data.values())
+    return any(
+        isinstance(value, dict) and value.get("class_type") == "VHS_LoadImagesPath"
+        for value in json_data.values()
+    )
 
 def has_input_node(json_data: dict) -> bool:
     # Track if json file has an input node
     """Check if JSON has an input node."""
-    return any(value.get("class_type") in ["VHS_LoadImagesPath", "LoadImage"] for value in json_data.values())
+    return any(
+        isinstance(value, dict) and value.get("class_type") in ["VHS_LoadImagesPath", "LoadImage"]
+        for value in json_data.values()
+    )
 
-def search_params(json_data: dict, param_type: str) -> List[str]:
-    """Generalized search for int, float, and str parameters."""
+def search_params(json_data: dict, node_class: str) -> List[str]:
+    """Generalized search for int, float, and str parameters.
+
+    takes as input: json data and string of class_type: dnInteger, dnString dnFloat.
+
+    returns: full name of node (title)"""
+    
     param_list = []
-    for value in json_data.values():
-        if "_meta" in value and "title" in value["_meta"]:
-            title = value["_meta"]["title"]
-            if f"__{param_type}_" in title:
-                param_list.append(title.split(f"__{param_type}_")[1].split()[0])
+    for key, value in json_data.items():
+        if isinstance(value, dict) and "class_type" in value:
+            if value["class_type"] == node_class:
+                class_type = value["_meta"]["title"]
+                param_list.append(class_type)
     return param_list
 
-def update_values(json_data: dict, returned_args: dict, param_type: str, value_key: str) -> dict:
-    """Generalized update function for int, float, and str parameters."""
-    title_to_key = {value['_meta']['title']: key for key, value in json_data.items() if '_meta' in value}
+def update_values(json_data: dict, returned_args: dict, value_key: str) -> dict:
+    """Generalized update function for int, float, and str parameters.
 
+    takes as input: json data, new param values, value replacement key (from json file)"""
+
+    title_to_key = {value['_meta']['title']: key for key, value in json_data.items() if '_meta' in value}
     for arg_key, arg_value in returned_args.items():
-        suffix = f"__{param_type}_{arg_key}"
-        param_key = next((title for title in title_to_key if title.endswith(suffix)), None)
-        
-        if param_key:
-            key_to_update = title_to_key[param_key]
-            json_data[key_to_update]['inputs'][value_key] = arg_value
-            print(f"Updated {arg_key} to {arg_value} in key {key_to_update}")
+        key_to_update = title_to_key[arg_key]
+        json_data[key_to_update]['inputs'][value_key] = arg_value
+        #print(f"Updated {arg_key} to {arg_value} in key {key_to_update}")
 
     return json_data
 
@@ -155,7 +164,17 @@ def modify_json_input_dir(json_data: dict, input_ims: str) -> dict:
         raise ValueError("Neither LoadImage nor VHS_LoadImagesPath parameter found. Please make sure to use the correct pre-set JSON template.")
     return json_data
 
-def _modify_json_param(json_data:dict, class_type: str, param_name: str, new_value: Any) -> dict:
+def get_dnfileout_version(data):
+    # Iterate over all keys in the JSON data
+    for key, value in data.items():
+        # Check if the class_type is 'dnFileOut'
+        if value.get('class_type') == 'dnFileOut':
+            # Return the version if it exists
+            return value.get('inputs', {}).get('version')
+    # If no 'dnFileOut' class_type is found, return None
+    return None
+
+def _modify_json_param(json_data: dict, class_type: str, param_name: str, new_value: Any) -> dict:
     """
     Helper function to modify a JSON parameter.
 
@@ -173,11 +192,15 @@ def _modify_json_param(json_data:dict, class_type: str, param_name: str, new_val
     """
     modified = False
     for key, value in json_data.items():
-        if value["class_type"] == class_type:
-            value["inputs"][param_name] = new_value
-            modified = True
+        # Check if the value is a dictionary and contains the required keys
+        if isinstance(value, dict) and value.get("class_type") == class_type:
+            if "inputs" in value and isinstance(value["inputs"], dict):
+                value["inputs"][param_name] = new_value
+                modified = True
+
     if not modified:
-        raise ValueError("parameter not found. Please make sure to use the correct pre-set JSON template.")
+        raise ValueError("Parameter not found. Please make sure to use the correct pre-set JSON template.")
+    
     return json_data
 
 # Parameter Modification Functions
@@ -211,8 +234,8 @@ def modify_json_controlnet_param(json_data: dict, controlnet: float) -> dict:
     """
     return _modify_json_param(json_data, "ControlNetApply", "strength", controlnet)
 
-def modify_json_output_param(json_data: dict, filename: str) -> dict:
-    """
-    Modifies the controlnet strength parameter 
-    """
-    return _modify_json_param(json_data, "SaveImage", "filename_prefix", filename)
+#def modify_json_output_param(json_data: dict, filename: str) -> dict:
+    #"""
+    #Modifies the controlnet strength parameter 
+    #"""
+    #return _modify_json_param(json_data, "SaveImage", "filename_prefix", filename)

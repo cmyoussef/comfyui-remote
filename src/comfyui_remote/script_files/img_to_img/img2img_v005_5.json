@@ -1,0 +1,216 @@
+{
+  "3": {
+    "inputs": {
+      "seed": [
+        "39",
+        0
+      ],
+      "steps": [
+        "38",
+        0
+      ],
+      "cfg": 5,
+      "sampler_name": "dpmpp_2m_sde",
+      "scheduler": "karras",
+      "denoise": 1,
+      "model": [
+        "4",
+        0
+      ],
+      "positive": [
+        "13",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "latent_image": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "4": {
+    "inputs": {
+      "ckpt_name": "SD_XL/juggernautXL_v10juggernautX.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "6": {
+    "inputs": {
+      "text": [
+        "40",
+        0
+      ],
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": "Cartoon",
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "12": {
+    "inputs": {
+      "pixels": [
+        "17",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "13": {
+    "inputs": {
+      "strength": [
+        "35",
+        0
+      ],
+      "conditioning": [
+        "6",
+        0
+      ],
+      "control_net": [
+        "14",
+        0
+      ],
+      "image": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "ControlNetApply",
+    "_meta": {
+      "title": "Apply ControlNet"
+    }
+  },
+  "14": {
+    "inputs": {
+      "control_net_name": "diffusers_xl_canny_full.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "Load ControlNet Model"
+    }
+  },
+  "15": {
+    "inputs": {
+      "low_threshold": 100,
+      "high_threshold": 200,
+      "resolution": 512,
+      "image": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "CannyEdgePreprocessor",
+    "_meta": {
+      "title": "Canny Edge"
+    }
+  },
+  "17": {
+    "inputs": {
+      "image": "ComfyUI_00002_.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image__master_naming"
+    }
+  },
+  "35": {
+    "inputs": {
+      "value": 0.7000000000000001
+    },
+    "class_type": "dnFloat",
+    "_meta": {
+      "title": "dnTemplate Float__CNstrength"
+    }
+  },
+  "38": {
+    "inputs": {
+      "value": 25
+    },
+    "class_type": "dnInteger",
+    "_meta": {
+      "title": "dnTemplate Integer__steps"
+    }
+  },
+  "39": {
+    "inputs": {
+      "value": 5523542
+    },
+    "class_type": "dnInteger",
+    "_meta": {
+      "title": "dnTemplate Integer__seed"
+    }
+  },
+  "40": {
+    "inputs": {
+      "string": "a dog wearing a hat"
+    },
+    "class_type": "dnString",
+    "_meta": {
+      "title": "dnTemplate String__PositivePrompt"
+    }
+  },
+  "42": {
+    "inputs": {
+      "filename_prefix": "dnsaver",
+      "version": "comfyUIVersion",
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "dnSaveImage",
+    "_meta": {
+      "title": "dnSaveImage"
+    }
+  }
+}

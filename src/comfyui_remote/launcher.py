@@ -5,12 +5,12 @@ import subprocess
 from executors.api_executor import ComfyConnector
 from config.settings_config import local_comfy_input, local_comfy_outputs
 from utils.json_utils import (
-    modify_json_input_dir, modify_json_output_param, load_json_data, is_input_dir, has_input_node,
-    search_params, update_values
+    modify_json_input_dir, load_json_data, is_input_dir, has_input_node,
+    search_params, update_values, get_dnfileout_version
 )
 from utils.cache_utils import update_cache, transfer_imgs_from_path, transfer_imgs_from_list, transfer_single_img
 from utils.common_utils import (
-    create_sequential_folder, kill_comfy_instances, has_frame_range, desired_frame_range, get_filenames_in_range,
+    kill_comfy_instances, has_frame_range, desired_frame_range, get_filenames_in_range,
     has_extension
 )
 
@@ -20,6 +20,7 @@ class ExecuteWorkflow:
         self.input_dir = input_dir
         self.batch_size = batch_size
         self.json_data = load_json_data(self.json_file)
+        self.comfyui_version = get_dnfileout_version(self.json_data)
         self.int_args = {}
         self.float_args = {}
         self.str_args = {}
@@ -27,22 +28,27 @@ class ExecuteWorkflow:
 
     def request_param_inputs(self) -> None:
         params = {
-            'int': search_params(self.json_data, 'int'),
-            'float': search_params(self.json_data, 'float'),
-            'str': search_params(self.json_data, 'str')
+            'int': search_params(self.json_data, 'dnInteger'),
+            'float': search_params(self.json_data, 'dnFloat'),
+            'str': search_params(self.json_data, 'dnString')
         }
 
         for param_type, param_list in params.items():
             for param in param_list:
-                value = input(f'Please enter value for {param} ({param_type}):')
-                if param_type == 'int':
-                    self.int_args[param] = value
-                elif param_type == 'float':
-                    self.float_args[param] = value
-                elif param_type == 'str':
-                    self.str_args[param] = value
+                while True:
+                    value = input(f'Please enter value for {param} ({param_type}): ')
+                    if value.strip():  # Check if value is not empty or just spaces
+                        if param_type == 'int':
+                            self.int_args[param] = value
+                        elif param_type == 'float':
+                            self.float_args[param] = value
+                        elif param_type == 'str':
+                            self.str_args[param] = value
+                        break  # Exit the loop if a valid value is entered
+                    else:
+                        print("Input cannot be empty. Please enter a value.")
 
-    def modify_json_with_params(self, img_in: str, temp_output: str) -> None:
+    def modify_json_with_params(self, img_in: str) -> None:
         """
         Modify JSON file with user prompts.
 
@@ -53,18 +59,17 @@ class ExecuteWorkflow:
             # modify input directory parameter
             self.json_data = modify_json_input_dir(self.json_data, img_in)
         if self.int_args:
-            self.json_data = update_values(self.json_data, self.int_args, 'int', 'value')
+            self.json_data = update_values(self.json_data, self.int_args, 'value')
         if self.float_args:
-            self.json_data = update_values(self.json_data, self.float_args, 'float', 'value')
+            self.json_data = update_values(self.json_data, self.float_args, 'value')
         if self.str_args:
-            self.json_data = update_values(self.json_data, self.str_args, 'str', 'string')
-        # Update the output filename param
-        self.json_data = modify_json_output_param(self.json_data, temp_output) # Set an output name
+            self.json_data = update_values(self.json_data, self.str_args, 'string')
 
     def run_api(self) -> None:
         if not self.json_data:
             raise ValueError("JSON data is not loaded or modified")
-        self.comfy_connector = ComfyConnector(self.json_data)
+        print("comfyui_version={}".format(self.comfyui_version))
+        self.comfy_connector = ComfyConnector(self.json_data, self.comfyui_version)
         self.generate_imgs()
 
     def generate_imgs(self) -> None:
@@ -95,8 +100,6 @@ class ExecuteWorkflow:
             raise ValueError("Input directory is required for this JSON workflow. Please use --input_dir arg.")
 
         self.prepare_input()
-        # update temporary output path
-        temp_output_path = os.path.join(create_sequential_folder(local_comfy_outputs), "ComfyUI_output")
 
         # request user args
         self.request_param_inputs()
@@ -108,7 +111,7 @@ class ExecuteWorkflow:
 
         for batch_num in range(1, self.batch_size + 1):
             for img_in in img_files:
-                self.modify_json_with_params(img_in, f"{temp_output_path}{batch_num}")
+                self.modify_json_with_params(img_in)
                 self.run_api()
 
         self.comfy_connector.kill_api()
