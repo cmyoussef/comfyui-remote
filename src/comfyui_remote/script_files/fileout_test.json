@@ -1,0 +1,66 @@
+{
+  "36": {
+    "inputs": {
+      "model_name": "4xRealWebPhoto_v3_atd.safetensors"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "Load Upscale Model"
+    }
+  },
+  "45": {
+    "inputs": {
+      "image": [
+        "46",
+        0
+      ],
+      "upload": "image"
+    },
+    "class_type": "dnLoadImage",
+    "_meta": {
+      "title": "dnLoadImage"
+    }
+  },
+  "46": {
+    "inputs": {
+      "text": "/u/gdso/Pictures/syndata_test/imgs/images_1.png"
+    },
+    "class_type": "dnString",
+    "_meta": {
+      "title": "Image_path"
+    }
+  },
+  "87": {
+    "inputs": {
+      "fileName": "test.####.exr",
+      "sRGB_to_linear": true,
+      "start_frame": 1001,
+      "overwrite": false,
+      "save_workflow": "none",
+      "version": "1.0.5",
+      "images": [
+        "45",
+        0
+      ]
+    },
+    "class_type": "dnFileOut",
+    "_meta": {
+      "title": "dnFileOut"
+    }
+  },
+  "99": {
+    "inputs": {
+      "dnFileOut": [
+        "87",
+        0
+      ],
+      "task": "comp",
+      "subtask": "precomp",
+      "label": "comfyui_publisher"
+    },
+    "class_type": "dnPublisher",
+    "_meta": {
+      "title": "dnPublisher"
+    }
+  }
+}

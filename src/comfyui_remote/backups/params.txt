@@ -1,0 +1,31 @@
+Text to Image:
+
+json_file
+output_filename
+positive_prompt
+negative_prompt
+steps
+cfg
+denoise
+seed
+
+
+Image to Image:
+
+json_file
+input_dir
+output_filename
+positive_prompt
+negative_prompt
+steps
+cfg
+denoise
+seed
+controlnet
+
+
+Depth and Normals:
+
+json_file
+input_dir
+output_filename

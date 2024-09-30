@@ -101,3 +101,41 @@ def transfer_single_img(img_path, temp_dir):
 
     elif cont == True and file_extension != '.exr':
         shutil.copy(dir_path + '/' + img_name, temp_dir)
+
+def get_file_paths(cache_dir):
+    """Walk through a directory and return sorted list of file paths."""
+    file_paths = []
+    for dirpath, _, filenames in os.walk(cache_dir):
+        file_paths.extend([os.path.join(dirpath, filename) for filename in sorted(filenames)])
+    return file_paths
+
+def extend_list_to_length(file_list, length):
+    """Extend a list to a specified length by repeating the last element."""
+    return file_list + [file_list[-1]] * (length - len(file_list))
+
+def iterate_through_files(cache_dirs):
+    """Iterate through files in multiple directories, extending shorter lists."""
+    # Collect file paths for each directory in cache_dirs
+    files_list = [get_file_paths(cache_dir) for cache_dir in cache_dirs]
+
+    # Determine the maximum length of the lists
+    if not files_list:
+        raise Exception("No input images found")
+    max_length = max(len(files) for files in files_list)
+
+    # Extend all lists to match the maximum length
+    extended_files_list = [extend_list_to_length(files, max_length) for files in files_list]
+
+    # Now iterate through the extended lists simultaneously
+    for files in zip(*extended_files_list):
+        yield files
+
+def get_folder_name(file_path):
+    # Split the file path into parts
+    parts = file_path.split(os.sep)
+    
+    # Ensure there are enough parts to get the second-to-last folder
+    if len(parts) >= 2:
+        return parts[-2]
+    else:
+        return None  # or you could return an empty string or another placeholder

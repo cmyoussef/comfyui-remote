@@ -1,6 +1,7 @@
 import re
 import os
 import subprocess
+from pathlib import Path
 
 os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
 
@@ -55,6 +56,22 @@ def get_filenames(path):
     else:
         raise ValueError(f"The path {path} does not exist.")
 
+def extract_paths(input_dict):
+    paths = []
+    for key, value in input_dict.items():
+        if isinstance(value, str):
+            path = Path(value)
+            # Check if the path is absolute or exists relative to the current directory
+            if path.is_absolute() or path.exists():
+                paths.append({key: value})
+    return paths
+
+def remove_extracted_paths(input_dict, extracted_paths):
+    for path_dict in extracted_paths:
+        for key in path_dict:
+            input_dict.pop(key, None)
+    return input_dict
+
 def has_frame_range(folder_path):
     # List all files in the folder
     files = os.listdir(folder_path)
@@ -82,11 +99,11 @@ def has_frame_range(folder_path):
     # Return the frame range
     return True #f"{numbers[0]}-{numbers[-1]}"
 
-def desired_frame_range():
+def desired_frame_range(input_key):
     while True:
         try:
             # Prompt the user to enter the frame range
-            frame_range = input("Enter the frame range (start-end): ")
+            frame_range = input(f"Enter the frame range (start-end) for {input_key}: ")
 
             # Split the input into start and end frames
             start_frame, end_frame = frame_range.split('-')
