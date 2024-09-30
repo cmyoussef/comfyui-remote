@@ -184,7 +184,7 @@ def get_dnfileout_version(data):
     # Iterate over all keys in the JSON data
     for key, value in data.items():
         # Check if the class_type is 'dnFileOut'
-        if value.get('class_type') == 'dnFileOut':
+        if value.get('class_type') == 'dnFileOut' or value.get('class_type') == 'dnSaveImage':
             # Return the version if it exists
             return value.get('inputs', {}).get('version')
     # If no 'dnFileOut' class_type is found, return None
