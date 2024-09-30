@@ -20,7 +20,7 @@ import subprocess
 from typing import List
 import sys
 import logging
-
+import ast
 
 os.environ["PYTHONPATH"] = ""
 
@@ -137,24 +137,39 @@ class ComfyConnector:
         req = urllib.request.Request(f"{self.server_address}/prompt", data=data, headers=headers)
         return json.loads(urllib.request.urlopen(req).read())
 
-    def generate_images(self, payload): # This method is used to generate images from a prompt and is the main method of this class
+    def generate_images(self, payload): 
         try:
-            if not self.ws.connected: # Check if the WebSocket is connected to the API server and reconnect if necessary
+            if not self.ws.connected: 
                 logger.info("WebSocket is not connected. Reconnecting...")
                 self.ws.connect(self.ws_address)
+            
             prompt_id = self.queue_prompt(payload)['prompt_id']
+            
             while True:
-                out = self.ws.recv() # Wait for a message from the API server
-                if isinstance(out, str): # Check if the message is a string
-                    message = json.loads(out) # Parse the message as JSON
-                    if message['type'] == 'executing': # Check if the message is an 'executing' message
-                        data = message['data'] # Extract the data from the message
+                out = self.ws.recv() 
+                if isinstance(out, str): 
+                    message = json.loads(out)
+                    if message['type'] == 'executing': 
+                        data = message['data'] 
                         if data['node'] is None and data['prompt_id'] == prompt_id:
                             break
-            address = self.find_output_node(payload) # Find the SaveImage node; workflow MUST contain only one SaveImage node
+            
+            address = self.find_output_node(payload)
             history = self.get_history(prompt_id)[prompt_id]
-            filenames = eval(f"history['outputs']{address}")['images']  # Extract all images
-            images = []
+
+            try:
+                # Try to convert the string back to a dictionary
+                parsed_address = ast.literal_eval(address)
+                if "ui" in parsed_address and "images" in parsed_address["ui"]:
+                    filenames = parsed_address["ui"]["images"]
+                    print(f'Extracted images: {parsed_address["ui"]["images"]}')
+                else:
+                    filenames = eval(f"history['outputs']{address}")['images']  # Extract all images
+            except Exception as e:  # Handle the inner try block error
+                logger.error(f"Error parsing address or extracting images: {e}")
+                return []
+            images = []  # Initialize images list outside the inner try block
+
             for img_info in filenames:
                 filename = img_info['filename']
                 subfolder = img_info['subfolder']
@@ -163,7 +178,9 @@ class ComfyConnector:
                 image_file = io.BytesIO(image_data)
                 image = Image.open(image_file)
                 images.append(image)
+
             return images
+
         except Exception as e:
             exc_type, exc_value, exc_traceback = sys.exc_info()
             line_no = exc_traceback.tb_lineno

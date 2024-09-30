@@ -90,7 +90,7 @@ def modify_syndata_input(json_data: dict, new_rgb_input: str, new_depth_input: s
 def is_input_dir(json_data: dict) -> bool:
     # Track if input node takes a directory as input
     return any(
-        isinstance(value, dict) and value.get("class_type") == "VHS_LoadImagesPath"
+        isinstance(value, dict) and value.get("class_type") in {"VHS_LoadImagesPath", "dnLoadImagePath"}
         for value in json_data.values()
     )
 
@@ -98,7 +98,7 @@ def has_input_node(json_data: dict) -> bool:
     # Track if json file has an input node
     """Check if JSON has an input node."""
     return any(
-        isinstance(value, dict) and value.get("class_type") in ["VHS_LoadImagesPath", "LoadImage"]
+        isinstance(value, dict) and value.get("class_type") in ["VHS_LoadImagesPath", "LoadImage", "dnLoadImage", "dnLoadImagePath"]
         for value in json_data.values()
     )
 
@@ -117,18 +117,25 @@ def search_params(json_data: dict, node_class: str) -> List[str]:
                 param_list.append(class_type)
     return param_list
 
-def update_values(json_data: dict, returned_args: dict, value_key: str) -> dict:
+def update_values(json_data: dict, returned_args: dict) -> dict:
     """Generalized update function for int, float, and str parameters.
 
-    takes as input: json data, new param values, value replacement key (from json file)"""
-
+    Takes as input: json data, new param values.
+    Automatically finds and updates the correct key in the inputs section."""
+    
     title_to_key = {value['_meta']['title']: key for key, value in json_data.items() if '_meta' in value}
+    
     for arg_key, arg_value in returned_args.items():
         key_to_update = title_to_key[arg_key]
-        json_data[key_to_update]['inputs'][value_key] = arg_value
-        #print(f"Updated {arg_key} to {arg_value} in key {key_to_update}")
+        
+        # Automatically find the correct key within the 'inputs' dictionary
+        for input_key in json_data[key_to_update]['inputs']:
+            # Update the value for the found key
+            json_data[key_to_update]['inputs'][input_key] = arg_value
+            break  # Assuming there's only one key-value pair to update per 'inputs'
 
     return json_data
+
 
 def modify_json_input_dir(json_data: dict, input_ims: str) -> dict:
     """
@@ -156,7 +163,16 @@ def modify_json_input_dir(json_data: dict, input_ims: str) -> dict:
                     raise NotADirectoryError(input_ims)
                 value["inputs"]["directory"] = input_ims
                 modified = True
+            if value["class_type"] == "dnLoadImagePath":
+                # Check if input is a directory
+                if not os.path.isdir(input_ims):
+                    raise NotADirectoryError(input_ims)
+                value["inputs"]["directory"] = input_ims
+                modified = True
             if value["class_type"] == "LoadImage":
+                value["inputs"]["image"] = input_ims
+                modified = True
+            if value["class_type"] == "dnLoadImage":
                 value["inputs"]["image"] = input_ims
                 modified = True
     #If no modification was made, raise an error
@@ -198,8 +214,8 @@ def _modify_json_param(json_data: dict, class_type: str, param_name: str, new_va
                 value["inputs"][param_name] = new_value
                 modified = True
 
-    if not modified:
-        raise ValueError("Parameter not found. Please make sure to use the correct pre-set JSON template.")
+    #if not modified:
+        #raise ValueError("Parameter not found. Please make sure to use the correct pre-set JSON template.")
     
     return json_data
 
@@ -233,6 +249,18 @@ def modify_json_controlnet_param(json_data: dict, controlnet: float) -> dict:
     Modifies the controlnet strength parameter 
     """
     return _modify_json_param(json_data, "ControlNetApply", "strength", controlnet)
+
+def modify_fileout_start_frame(json_data, start_frame):
+    return _modify_json_param(json_data, "dnFileOut", "start_frame", start_frame)
+
+def modify_fileout_end_frame(json_data, end_frame):
+    return _modify_json_param(json_data, "dnFileOut", "end_frame", end_frame)
+
+def modify_fileout_folder_bool(json_data, create_output_folder):
+    return _modify_json_param(json_data, "dnFileOut", "create_output_folder", create_output_folder)
+
+def modify_run_publisher(json_data, event_val=False):
+    return _modify_json_param(json_data, "dnPublisher", "event_val", event_val)
 
 #def modify_json_output_param(json_data: dict, filename: str) -> dict:
     #"""

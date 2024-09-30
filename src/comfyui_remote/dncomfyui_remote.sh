@@ -45,15 +45,39 @@ fi
 export PYTHONPATH=""
 conda activate "$COMFY_VERSION_PATH"
 
-# Prompt the user for inputs
-read -p "Enter the path for --json_file: " json_file
-read -p "Enter the path for --input_dir: " input_dir
-read -p "Enter the value for --batch_size: (default=1) " batch_size
+# add everything below to dncomfyui bash script
+# Default values
+json_file=""
+batch_size=1
+frame_range=None
+int_args=None
+float_args=None
+str_args=None
+
+# Parse command-line arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --json_file) json_file="$2"; shift ;;
+        --batch_size) batch_size="$2"; shift ;;
+        --frame_range) frame_range="$2"; shift ;;
+        --int_args) int_args="$2"; shift ;;
+        --float_args) float_args="$2"; shift ;;
+        --str_args) str_args="$2"; shift ;;
+        *) echo "Unknown parameter passed: $1"; exit 1 ;;
+    esac
+    shift
+done
+
+# Check if json_file was provided
+if [ -z "$json_file" ]; then
+    echo "Error: --json_file is required"
+    exit 1
+fi
 
 # Navigate to the target directory
 pushd `pwd`
 cd $COMFY_REMOTE_VERSION_PATH/ComfyUI_remote
 
-# Execute the Python script with user inputs
-python ./launcher.py --json_file "$json_file" --input_dir "$input_dir" --batch_size "$batch_size"
+# Execute the Python script with the provided inputs
+python ./launcher.py --json_file "$json_file" --batch_size "$batch_size" --frame_range "$frame_range"  --int_args "$int_args" --float_args "$float_args" --str_args "$str_args"
 popd
