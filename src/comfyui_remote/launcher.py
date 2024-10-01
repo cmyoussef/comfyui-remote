@@ -2,12 +2,13 @@ import os, shutil
 import json
 import tyro
 import subprocess
+import copy
 from typing import Optional
 from executors.api_executor import ComfyConnector
 from config.settings_config import local_comfy_path, local_comfy_input, local_comfy_outputs
 from utils.json_utils import (
     modify_json_input_dir, load_json_data, has_input_node,
-    search_params, update_values, get_dnfileout_version, is_input_dir, modify_fileout_folder_bool, modify_run_publisher
+    search_params, update_values, get_dnfileout_version, is_input_dir, modify_fileout_folder_bool, remove_publisher
 )
 from utils.cache_utils import (
     update_cache, transfer_imgs_from_path, transfer_imgs_from_list, transfer_single_img, get_file_paths, extend_list_to_length,
@@ -101,21 +102,21 @@ class ExecuteWorkflow:
         
         print(command)
 
-    def run_api(self) -> None:
-        if not self.json_data:
+    def run_api(self, modified_json) -> None:
+        if not modified_json:
             raise ValueError("JSON data is not loaded or modified")
         print("comfyui_version={}".format(self.comfyui_version))
-        self.comfy_connector = ComfyConnector(self.json_data, self.comfyui_version) # First image is generated here as a "test image"
+        self.comfy_connector = ComfyConnector(modified_json, self.comfyui_version) # First image is generated here as a "test image"
 
         # Skip generate_imgs() the first time
         if not self.first_run:
-            self.generate_imgs()
+            self.generate_imgs(modified_json)
 
         #after first run, set first_run to False
         self.first_run = False
 
-    def generate_imgs(self) -> None:
-        self.comfy_connector.generate_images(self.json_data)
+    def generate_imgs(self, modified_json) -> None:
+        self.comfy_connector.generate_images(modified_json)
 
     def prepare_input(self) -> None:
         # Process each input directory
@@ -204,14 +205,18 @@ class ExecuteWorkflow:
                         modify_fileout_folder_bool(self.json_data, False)
 
                      # Check if this is the last iteration
-                    if current_iteration == total_iterations:
-                        # Run the publisher before the last API call
-                        modify_run_publisher(self.json_data, event_val=True)
-                    self.run_api()
+                    if current_iteration != total_iterations:
+                        # Remove any dnPublisher nodes if its not the final iteration
+                        json_data_copy = copy.deepcopy(self.json_data)
+                        modified_json = remove_publisher(json_data_copy)
+                    else:
+                        modified_json = self.json_data
+
+                    self.run_api(modified_json)
             for cache in self.cache_dirs:
                 shutil.rmtree(cache)
         else:
-            self.run_api()
+            self.run_api(self.json_data)
         self.comfy_connector.kill_api()
         kill_comfy_instances()
         self.display_command()

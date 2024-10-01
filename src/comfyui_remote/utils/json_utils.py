@@ -180,6 +180,16 @@ def modify_json_input_dir(json_data: dict, input_ims: str) -> dict:
         raise ValueError("Neither LoadImage nor VHS_LoadImagesPath parameter found. Please make sure to use the correct pre-set JSON template.")
     return json_data
 
+def remove_publisher(json_data):
+    # Find dnPublisher key
+    dnPublisher_key = [key for key, value in json_data.items() if value.get('class_type') == "dnPublisher"]
+
+    # Remove the keys from the JSON data
+    for key in dnPublisher_key:
+        json_data.pop(key, None)
+
+    return json_data
+
 def get_dnfileout_version(data):
     # Iterate over all keys in the JSON data
     for key, value in data.items():
