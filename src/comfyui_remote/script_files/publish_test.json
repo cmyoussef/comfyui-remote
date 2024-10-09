@@ -1,0 +1,26 @@
+{
+  "1": {
+    "inputs": {
+      "text": "/user_data/comfyui/output/004"
+    },
+    "class_type": "dnString",
+    "_meta": {
+      "title": "dnString"
+    }
+  },
+  "2": {
+    "inputs": {
+      "dnFileOut": [
+        "1",
+        0
+      ],
+      "task": "comp",
+      "subtask": "precomp",
+      "label": "comfyui_publisher"
+    },
+    "class_type": "dnPublisher",
+    "_meta": {
+      "title": "dnPublisher"
+    }
+  }
+}

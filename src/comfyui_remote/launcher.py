@@ -8,7 +8,7 @@ from executors.api_executor import ComfyConnector
 from config.settings_config import local_comfy_path, local_comfy_input, local_comfy_outputs
 from utils.json_utils import (
     modify_json_input_dir, load_json_data, has_input_node,
-    search_params, update_values, get_dnfileout_version, is_input_dir, modify_fileout_folder_bool, remove_publisher
+    search_params, update_values, get_dnfileout_version, is_input_dir, modify_fileout_folder_bool, remove_publisher, json_publish_script
 )
 from utils.cache_utils import (
     update_cache, transfer_imgs_from_path, transfer_imgs_from_list, transfer_single_img, get_file_paths, extend_list_to_length,
@@ -170,9 +170,10 @@ class ExecuteWorkflow:
                     self.request_param_inputs(param, param_type)
 
         # extract any paths from str args
-        self.input_dirs = extract_paths(self.str_args)
-        # remove any input strings from str_args so that we have them seperated
-        self.str_args = remove_extracted_paths(self.str_args, self.input_dirs)
+        if not json_publish_script(self.json_data):
+            self.input_dirs = extract_paths(self.str_args)
+            # remove any input strings from str_args so that we have them seperated
+            self.str_args = remove_extracted_paths(self.str_args, self.input_dirs)
         # update user args
         self.modify_json_with_params()
 
@@ -185,6 +186,7 @@ class ExecuteWorkflow:
         #input_node_type_dir = is_input_dir(self.json_data)
 
         if cache_path:
+            print(f"cache_path={cache_path}")
             total_iterations = sum(1 for _ in iterate_through_files(self.cache_dirs)) * self.batch_size
             current_iteration = 0
             for batch_num in range(1, self.batch_size + 1):
@@ -211,7 +213,7 @@ class ExecuteWorkflow:
                         modified_json = remove_publisher(json_data_copy)
                     else:
                         modified_json = self.json_data
-
+                    print(json.dumps(modified_json, indent=2))
                     self.run_api(modified_json)
             for cache in self.cache_dirs:
                 shutil.rmtree(cache)

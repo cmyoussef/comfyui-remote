@@ -87,6 +87,20 @@ def modify_syndata_input(json_data: dict, new_rgb_input: str, new_depth_input: s
     # Convert the dictionary back to a JSON string
     return json_data
 
+def json_publish_script(json_data):
+    # Ensure there are exactly 2 keys
+    if len(json_data) != 2:
+        return False
+    
+    # Extract the class_type values
+    class_types = [item.get("class_type") for item in json_data.values()]
+    
+    # Check if one key has class_type "dnString" and the other "dnPublisher"
+    if "dnString" in class_types and "dnPublisher" in class_types and len(class_types) == 2:
+        return True
+    else:
+        return False
+
 def is_input_dir(json_data: dict) -> bool:
     # Track if input node takes a directory as input
     return any(
