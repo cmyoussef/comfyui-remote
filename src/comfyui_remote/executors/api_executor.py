@@ -71,7 +71,7 @@ class ComfyConnector:
                 api_command_line = settings_config.API_COMMAND_LINE + f" --port {self.urlport}" # Add the port to the command line
             if self._process is None or self._process.poll() is not None: # Check if the process is not running or has terminated for some reason
                 self._process = subprocess.Popen(api_command_line.split())
-                logger.info("API process started with PID:", self._process.pid)
+                logger.info("API process started with PID: %s", self._process.pid)
                 self.wait_for_api_to_start()
 
     def wait_for_api_to_start(self):

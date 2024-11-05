@@ -2,6 +2,7 @@ import os, shutil
 import cv2
 import numpy as np
 from pathlib import Path
+import re
 
 ### Cache Utils ###
 
@@ -32,18 +33,19 @@ def transfer_imgs_from_path(im_path, temp_dir):
                 print(file_extension)
                 raise Exception("Please make sure your files are either EXR's, PNG's, or JPEG's")
 
-            if cont == True and file_extension == '.exr':
-                full_im_path = os.path.join(im_path, i)
-                img = cv2.imread(full_im_path, -1)
-                img = img * 65535
-                img[img > 65535] = 65535
-                img = np.uint16(img)
+            #if cont == True and file_extension == '.exr':
+                #full_im_path = os.path.join(im_path, i)
+                #img = cv2.imread(full_im_path, -1)
+                #img = img * 65535
+                #img[img > 65535] = 65535
+                #img = np.uint16(img)
 
-                png_name = i.replace('.exr', '.png')
-                full_output_path = os.path.join(temp_dir, png_name)
-                cv2.imwrite(full_output_path, img)
+                #png_name = i.replace('.exr', '.png')
+                #full_output_path = os.path.join(temp_dir, png_name)
+                #cv2.imwrite(full_output_path, img)
 
-            elif cont == True and file_extension != '.exr':
+            #elif cont == True and file_extension != '.exr':
+            if cont == True:
                 shutil.copy(im_path + '/' + i, temp_dir)
     else:
         raise Exception("No files found inside input path")
@@ -62,17 +64,18 @@ def transfer_imgs_from_list(im_list, temp_dir):
                 print(file_extension)
                 raise Exception("Please make sure your files are either EXR's, PNG's, or JPEG's")
 
-            if cont == True and file_extension == '.exr':
-                img = cv2.imread(i, -1)
-                img = img * 65535
-                img[img > 65535] = 65535
-                img = np.uint16(img)
+            #if cont == True and file_extension == '.exr':
+                #img = cv2.imread(i, -1)
+                #img = img * 65535
+                #img[img > 65535] = 65535
+                #img = np.uint16(img)
                 
-                png_name = img_name.replace('.exr', '.png')
-                full_output_path = os.path.join(temp_dir, png_name)
-                cv2.imwrite(full_output_path, img)
+                #png_name = img_name.replace('.exr', '.png')
+                #full_output_path = os.path.join(temp_dir, png_name)
+                #cv2.imwrite(full_output_path, img)
 
-            elif cont == True and file_extension != '.exr':
+            #elif cont == True and file_extension != '.exr':
+            if cont == True:
                 shutil.copy(dir_path + '/' + img_name, temp_dir)
     else:
         raise Exception("No files found in list")
@@ -89,17 +92,18 @@ def transfer_single_img(img_path, temp_dir):
         print(file_extension)
         raise Exception("Please make sure your files are either EXR's, PNG's, or JPEG's")
 
-    if cont == True and file_extension == '.exr':
-        img = cv2.imread(img_path, -1)
-        img = img * 65535
-        img[img > 65535] = 65535
-        img = np.uint16(img)
+    #if cont == True and file_extension == '.exr':
+        #img = cv2.imread(img_path, -1)
+        #img = img * 65535
+        #img[img > 65535] = 65535
+        #img = np.uint16(img)
         
-        png_name = img_name.replace('.exr', '.png')
-        full_output_path = os.path.join(temp_dir, png_name)
-        cv2.imwrite(full_output_path, img)
+        #png_name = img_name.replace('.exr', '.png')
+        #full_output_path = os.path.join(temp_dir, png_name)
+        #cv2.imwrite(full_output_path, img)
 
-    elif cont == True and file_extension != '.exr':
+    #elif cont == True and file_extension != '.exr':
+    if cont == True:
         shutil.copy(dir_path + '/' + img_name, temp_dir)
 
 def get_file_paths(cache_dir):
@@ -139,3 +143,17 @@ def get_folder_name(file_path):
         return parts[-2]
     else:
         return None  # or you could return an empty string or another placeholder
+
+def clean_input_dirs(input_dirs):
+    # Pattern to match filenames ending specifically with ".####" or "_####"
+    pattern = r"(.*[\\/])[^\\/]*[._]####(?:\.[^.]+)?$"
+    
+    # Iterate over each dictionary in the list
+    for item in input_dirs:
+        # Iterate over each key-value pair in the dictionary
+        for key, path in item.items():
+            # Check if path matches the pattern and extract the folder path if it does
+            match = re.match(pattern, path)
+            if match:
+                # Update the path in the dictionary to just the folder path
+                item[key] = match.group(1).rstrip('/')
