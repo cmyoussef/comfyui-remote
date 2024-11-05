@@ -1,5 +1,5 @@
-ComfyUIRemote
-ComfyUIRemote is a tool for executing workflows in ComfyUI by specifying a JSON file that defines the workflow and its associated parameters.
+NukeRemote
+NukeRemote is a tool for executing workflows in ComfyUI by specifying a JSON file that defines the workflow and its associated parameters.
 
 Usage
 To run the tool, use the following command in your terminal:

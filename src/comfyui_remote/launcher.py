@@ -7,12 +7,12 @@ from typing import Optional
 from executors.api_executor import ComfyConnector
 from config.settings_config import local_comfy_path, local_comfy_input, local_comfy_outputs
 from utils.json_utils import (
-    modify_json_input_dir, load_json_data, has_input_node,
+    modify_json_input_dir, load_json_data, has_input_node, modify_dnloader, modify_start_frame,
     search_params, update_values, get_dnfileout_version, is_input_dir, modify_fileout_folder_bool, remove_publisher, json_publish_script
 )
 from utils.cache_utils import (
     update_cache, transfer_imgs_from_path, transfer_imgs_from_list, transfer_single_img, get_file_paths, extend_list_to_length,
-    iterate_through_files, get_folder_name
+    iterate_through_files, get_folder_name, clean_input_dirs
 )
 from utils.common_utils import (
     kill_comfy_instances, has_frame_range, desired_frame_range, get_filenames_in_range,
@@ -93,9 +93,12 @@ class ExecuteWorkflow:
         if self.int_args:
             command += f" --int_args '{json.dumps(self.int_args)}'"
         if self.str_args:
-            # If input_dirs exists, merge its 'inputPath' with str_args
+            # If input_dirs exists, merge it with str_args
             if self.input_dirs:
-                self.str_args['inputPath'] = self.input_dirs[0]['inputPath']  # Add inputPath to str_args
+                input_key = list(self.input_dirs[0].keys())[0]
+                input_value = self.input_dirs[0][input_key]
+
+                self.str_args[input_key] = input_value  # Add inputPath to str_args
             command += f" --str_args '{json.dumps(self.str_args)}'"
         if self.float_args:
             command += f" --float_args '{json.dumps(self.float_args)}'"
@@ -137,6 +140,7 @@ class ExecuteWorkflow:
                         if is_sequence:
                             # Handle sequence frame range
                             start, end = desired_frame_range(key)
+                            modify_start_frame(self.json_data,start)
                             input_filenames = get_filenames_in_range(path, start, end)
                             transfer_imgs_from_list(im_list=input_filenames, temp_dir=cache_path)
                         else:
@@ -149,12 +153,14 @@ class ExecuteWorkflow:
                     start_frame, end_frame = self.frame_range.split('-')
                     start_frame = int(start_frame)
                     end_frame = int(end_frame)
+                    modify_start_frame(self.json_data, start_frame)
                     # Ensure the start frame is less than or equal to the end frame
                     if start_frame > end_frame:
                         print("Error: Start frame must be less than or equal to end frame.")
                         continue
                     input_filenames = get_filenames_in_range(path, start_frame, end_frame)
                     transfer_imgs_from_list(im_list=input_filenames, temp_dir=cache_path)
+
             return cache_path
 
     def execute(self):
@@ -172,10 +178,12 @@ class ExecuteWorkflow:
         # extract any paths from str args
         if not json_publish_script(self.json_data):
             self.input_dirs = extract_paths(self.str_args)
+            clean_input_dirs(self.input_dirs)
             # remove any input strings from str_args so that we have them seperated
             self.str_args = remove_extracted_paths(self.str_args, self.input_dirs)
         # update user args
         self.modify_json_with_params()
+        modify_dnloader(self.json_data, True)
 
         # update cache dirs
         cache_path = self.prepare_input()
@@ -186,7 +194,7 @@ class ExecuteWorkflow:
         #input_node_type_dir = is_input_dir(self.json_data)
 
         if cache_path:
-            print(f"cache_path={cache_path}")
+            #print(f"cache_path={cache_path}")
             total_iterations = sum(1 for _ in iterate_through_files(self.cache_dirs)) * self.batch_size
             current_iteration = 0
             for batch_num in range(1, self.batch_size + 1):
@@ -213,7 +221,7 @@ class ExecuteWorkflow:
                         modified_json = remove_publisher(json_data_copy)
                     else:
                         modified_json = self.json_data
-                    print(json.dumps(modified_json, indent=2))
+                    #print(json.dumps(modified_json, indent=2))
                     self.run_api(modified_json)
             for cache in self.cache_dirs:
                 shutil.rmtree(cache)

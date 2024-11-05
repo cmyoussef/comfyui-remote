@@ -1,0 +1,83 @@
+{
+  "6": {
+    "inputs": {
+      "model_name": "4xFaceUpSharpDAT.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "Load Upscale Model"
+    }
+  },
+  "7": {
+    "inputs": {
+      "upscale_model": [
+        "6",
+        0
+      ],
+      "image": [
+        "23",
+        0
+      ]
+    },
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": {
+      "title": "Upscale Image (using Model)"
+    }
+  },
+  "13": {
+    "inputs": {
+      "images": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "14": {
+    "inputs": {
+      "fileName": "upscale.####.exr",
+      "sRGB_to_linear": true,
+      "start_frame": 1001,
+      "create_output_folder": true,
+      "overwrite": false,
+      "save_workflow": "none",
+      "version": "1.0.5",
+      "images": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "dnFileOut",
+    "_meta": {
+      "title": "dnFileOut"
+    }
+  },
+  "22": {
+    "inputs": {
+      "text": ""
+    },
+    "class_type": "dnString",
+    "_meta": {
+      "title": "filePath"
+    }
+  },
+  "23": {
+    "inputs": {
+      "filepath": [
+        "22",
+        0
+      ],
+      "image_load_cap": 0,
+      "skip_first_images": 0,
+      "select_every_nth": 1,
+      "single_image": false
+    },
+    "class_type": "dnLoader",
+    "_meta": {
+      "title": "dnLoader"
+    }
+  }
+}

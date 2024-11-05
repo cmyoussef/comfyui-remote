@@ -274,14 +274,19 @@ def modify_json_controlnet_param(json_data: dict, controlnet: float) -> dict:
     """
     return _modify_json_param(json_data, "ControlNetApply", "strength", controlnet)
 
-def modify_fileout_start_frame(json_data, start_frame):
-    return _modify_json_param(json_data, "dnFileOut", "start_frame", start_frame)
+def modify_start_frame(json_data, start_frame):
+    fileout_result = _modify_json_param(json_data, "dnFileOut", "start_frame", start_frame)
+    saveimage_result = _modify_json_param(json_data, "dnSaveImage", "start_frame", start_frame)
+    return fileout_result, saveimage_result
 
 def modify_fileout_end_frame(json_data, end_frame):
     return _modify_json_param(json_data, "dnFileOut", "end_frame", end_frame)
 
 def modify_fileout_folder_bool(json_data, create_output_folder):
     return _modify_json_param(json_data, "dnFileOut", "create_output_folder", create_output_folder)
+
+def modify_dnloader(json_data, first_image_only):
+    return _modify_json_param(json_data, "dnLoader", "first_image_only", first_image_only)
 
 def modify_run_publisher(json_data, event_val=False):
     return _modify_json_param(json_data, "dnPublisher", "event_val", event_val)
