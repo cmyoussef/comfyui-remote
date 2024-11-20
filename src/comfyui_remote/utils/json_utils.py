@@ -214,6 +214,26 @@ def get_dnfileout_version(data):
     # If no 'dnFileOut' class_type is found, return None
     return None
 
+def display_json_param(json_data: dict, param: str) -> dict:
+    """
+    Takes as input: json data, new param values.
+    Automatically finds and returns the default key in the inputs section."""
+    
+    title_to_key = {value['_meta']['title']: key for key, value in json_data.items() if '_meta' in value}
+    
+
+    key_to_update = title_to_key[param]
+    #print(f"key_to_update={key_to_update}")
+    
+    # Automatically find the correct key within the 'inputs' dictionary
+    for input_key in json_data[key_to_update]['inputs']:
+        # Update the value for the found key
+        default_value = json_data[key_to_update]['inputs'][input_key]
+        #print(f"default_value={default_value}")
+        break  # Assuming there's only one key-value pair to update per 'inputs'
+
+    return default_value
+
 def _modify_json_param(json_data: dict, class_type: str, param_name: str, new_value: Any) -> dict:
     """
     Helper function to modify a JSON parameter.

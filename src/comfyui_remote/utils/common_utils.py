@@ -2,7 +2,7 @@ import re
 import os
 import subprocess
 from pathlib import Path
-
+import json
 os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
 
 def kill_comfy_instances():
@@ -10,6 +10,28 @@ def kill_comfy_instances():
         "ps ux | grep python | grep cuda | grep main.py | awk '{print $2}' | xargs sudo kill",
         shell=True
     )
+
+def display_command(input_dirs, json_file, batch_size, frame_range, int_args, float_args, str_args):
+        command = f"dncomfyui -r --json_file {json_file} --batch_size {batch_size}"
+        if frame_range:
+            command += f" --frame_range {frame_range}"
+        if int_args:
+            command += f" --int_args '{json.dumps(int_args)}'"
+
+        if float_args:
+            command += f" --float_args '{json.dumps(float_args)}'"
+
+        if input_dirs:
+            input_key = list(input_dirs[0].keys())[0]
+            input_value = input_dirs[0][input_key]
+
+            str_args[input_key] = input_value  # Add inputPath to str_args
+            command += f" --str_args '{json.dumps(str_args)}'"
+        else:
+            command += f" --str_args '{json.dumps(str_args)}'"
+        
+        #print(command)
+        return(str(command))
 
 def create_sequential_folder(base_path):
     # Ensure the base path exists

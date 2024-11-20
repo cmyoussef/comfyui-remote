@@ -137,6 +137,12 @@ class ComfyConnector:
         req = urllib.request.Request(f"{self.server_address}/prompt", data=data, headers=headers)
         return json.loads(urllib.request.urlopen(req).read())
 
+    def get_output_node(self, payload):
+        for key, value in payload.items():
+            if isinstance(value, dict):
+                if value.get("class_type") in {"SaveImage", "dnFileOut", "dnSaveImage"}:
+                    return value.get("class_type")
+
     def generate_images(self, payload): 
         try:
             if not self.ws.connected: 
@@ -156,21 +162,22 @@ class ComfyConnector:
             
             address = self.find_output_node(payload)
             history = self.get_history(prompt_id)[prompt_id]
-
+            output_node = self.get_output_node(payload)
             try:
-                # Try to convert the string back to a dictionary
-                parsed_address = ast.literal_eval(address)
-                if "ui" in parsed_address and "images" in parsed_address["ui"]:
-                    filenames = parsed_address["ui"]["images"]
+                if output_node == "dnFileOut":
+                    filenames = eval(f"history['outputs']{address}")['images']  # Extract all images
                     print(f'Extracted images: {parsed_address["ui"]["images"]}')
+
                 else:
                     filenames = eval(f"history['outputs']{address}")['images']  # Extract all images
+                    print(f"extracted filenames={filenames}")
             except Exception as e:  # Handle the inner try block error
-                logger.error(f"Error parsing address or extracting images: {e}")
+                #logger.error(f"Error parsing address or extracting images: {e}")
                 return []
             images = []  # Initialize images list outside the inner try block
 
             for img_info in filenames:
+                
                 filename = img_info['filename']
                 subfolder = img_info['subfolder']
                 folder_type = img_info['type']
@@ -185,7 +192,7 @@ class ComfyConnector:
             exc_type, exc_value, exc_traceback = sys.exc_info()
             line_no = exc_traceback.tb_lineno
             error_message = f'Unhandled error at line {line_no}: {str(e)}'
-            logger.error("generate_images - ", error_message)
+            logger.error("generate_images - %s", error_message)
 
     def upload_image(self, filepath, subfolder=None, folder_type=None, overwrite=False):  # This method is used to upload an image to the API server for use in img2img or controlnet
         try: 
