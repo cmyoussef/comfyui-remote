@@ -11,6 +11,11 @@ import os
 from collections import defaultdict
 import json
 import subprocess
+import threading
+from tqdm import tqdm
+import time
+import re
+
 # Get the absolute path of the package.
 package_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # This is done by inserting the local package path at the beginning of sys.path, which gives it precedence over installed packages.
@@ -19,6 +24,8 @@ if package_path not in sys.path:
     
 # Available in dnegPipe5
 from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5.QtWidgets import QProgressDialog
+from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QApplication, QMessageBox, QMainWindow, QPushButton
 from PyQt5 import uic
 
@@ -26,7 +33,11 @@ from ComfyUI_remote.utils import json_utils
 from ComfyUI_remote.utils import pipe_query 
 from ComfyUI_remote.executors.api_executor import ComfyConnector
 from ComfyUI_remote.launcher import ExecuteWorkflow
+from ComfyUI_remote.utils.common_utils import display_command
 from ComfyUI_remote.Remote_GUI.configs import config
+
+import webbrowser
+
 
 __author__ = "Romain Bouvard"
 __email__ = "rnb@dneg.com"
@@ -52,7 +63,26 @@ def exception_handler(exc_type, exc_value, exc_traceback):
     msg_box.exec_()
 
 # Set the custom handler
-sys.excepthook = exception_handler
+#sys.excepthook = exception_handler
+
+class ExecuteWorkflowThread(QThread):
+    """Thread to execute workflow."""
+    progress = pyqtSignal(int)  # Signal to communicate progress updates
+    finished = pyqtSignal()  # Signal when execution is complete
+
+    def __init__(self, run_instance):
+        super().__init__()
+        self.run_instance = run_instance
+        self.run_instance.progress_signal.connect(self.handle_progress)
+
+    def handle_progress(self, value):
+        """Handle progress updates."""
+        print(f"Thread Received Progress: {value}%")  # Debug log
+        self.progress.emit(value)
+
+    def run(self):
+        self.run_instance.execute()
+        self.finished.emit()  # Notify that execution is finished
 
 class comfyRemote_UI(QtWidgets.QMainWindow):
     """ ComfyUI Remote Windows UI for Browsing published Templates and launch on local  """
@@ -63,7 +93,7 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
         setup Init file and load .ui file, qss and icon
          - StatusBar
         """
-        QtWidgets.QMainWindow.__init__(self,None)
+        super().__init__(parent)
         uic.loadUi(config.ui_path, self)
 
         # set UI Shows
@@ -82,6 +112,12 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
 
         # icons:
         self.setWindowIcon(QtGui.QIcon(config.icon_path))
+
+        # Action Menu:
+        self.actionUser_Guide.triggered.connect(self.open_url)
+        self.actionTemplate_Guide.triggered.connect(self.open_url)
+        self.actionOpen_Custom_Template.triggered.connect(self.open_custom_template)
+        self.actionOpen_Local_Folder.triggered.connect(self.open_Local_folder)
 
         # variables:
         self.templates = []
@@ -102,6 +138,74 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
         # Populate:
         self.connect_UI()
 
+    def open_url(self):
+        '''
+        Function to open specific URL of COMFYUI in DNET. URL currently hardcoded from actionMenu sender
+        '''
+        if self.sender().objectName() == 'actionUser_Guide':
+            url = "http://dnet.dneg.com/display/REDEFINE/comfyui_remote+GUI"
+
+        if self.sender().objectName() == 'actionTemplate_Guide':
+            url = "http://dnet.dneg.com/display/REDEFINE/02+-+dntemplates+-+advanced+cases+and+LIBRARY+available"
+            
+        webbrowser.open(url)
+
+    def populate_data(self, json_path):
+        json_data = json_utils.load_json_data(json_path)
+        self.extract_params(json_data)
+
+        for param_type, param_dict in self.params.items():
+            for param_name, default_value in param_dict.items():
+                # Create items for the row
+                param_item = QtGui.QStandardItem(param_name)
+                default_value_item = QtGui.QStandardItem(str(default_value))
+                type_item = QtGui.QStandardItem(param_type)
+
+                row = [param_item, default_value_item, type_item]
+                self.model_exposedParameters.appendRow(row)
+
+    def open_custom_template(self):
+        '''
+        Function to build for Opening a Non Publish Template
+        Useful for User to test before publishing
+        '''
+        # Define the specific folder
+        specific_folder = "/user_data/comfyui"  # Change to your desired folder
+
+        # Open file dialog starting in the specific folder
+        dialog = QtWidgets.QFileDialog(self, "Select a File")
+        dialog.setFileMode(QtWidgets.QFileDialog.ExistingFile)  # Restrict to existing files
+        dialog.setDirectory(specific_folder)  # Set the default directory
+        dialog.setNameFilters(["JSON Files (*.json)"])  # Allow only .json files
+        dialog.setOptions(QtWidgets.QFileDialog.DontUseNativeDialog)  # Non-native dialog for better control
+        
+        # Prevent the user from navigating outside the specific folder
+        dialog.setFilter(dialog.filter() | QtWidgets.QFileDialog.DontUseCustomDirectoryIcons)
+        
+        self.clear_template()
+        self.clear_data()
+        self.fill_rootParameters()
+
+        if dialog.exec_():
+            selected_file = dialog.selectedFiles()[0]
+            print(f"Selected File: {selected_file}")
+
+            self.json_path = dialog.selectedFiles()[0]
+            
+            self.populate_data(self.json_path)
+        else: 
+            self.statusBar.showMessage('select a JSON file exported with API Functionality')
+
+    def open_Local_folder(self):
+        """
+        Opening File System Browser to /user_data/output/ folder
+        """
+        path = "/user_data/comfyui/output"
+        if path:
+            os.system('xdg-open "%s"' % path)
+        else: 
+            self.statusBar.showMessage('/user_data/ folder not available')
+
     def clear_template(self):
         ''' Clear All Data from show update'''
         # Clear Template ComboBox:
@@ -120,7 +224,7 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
         """
         # Set the headers as numbers
         self.model_exposedParameters.setHorizontalHeaderLabels(["Parameters", "Values", "hiddenColumn"])
-        #self.tableView_ExposedArguments.hideColumn(2)
+        self.tableView_ExposedArguments.hideColumn(2)
 
         # Set the headers as numbers
         self.model_rootParameters.setHorizontalHeaderLabels(["Parameters", "Values", "Tooltip"])
@@ -142,16 +246,19 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
         self.clear_data()
         self.fill_rootParameters()
         self.fill_from_template()
-        
+    
     def query_template(self):
         """
         Load Templates from SHOW selected - Default is LIBRARY
             Return: list of Stalks - Spider Query
         """
+
         if self.selectShow.currentText()!= '':
 
             # Start the ComboBox with an Empty Entry
             self.selectTemplate.insertItem(0," ")
+            templates_name = []
+            templates_name_upscaler = []
 
             templates = pipe_query.pipequery_send(pipe_query.create_find_by_name_tags(
                 show = self.selectShow.currentText(),
@@ -161,14 +268,35 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
                 task=None
             ))
 
-            # get {names:filePath} as a LIST in self.templates
+            # get {names:filePath} as a LIST in self.templates for Status different of DECLINED:
             for template in templates['data']['latest_versions']:
-                self.templates.append({template['name']:template['files'][0]['path']})
-                #Populate comboBox
-                self.selectTemplate.addItem(template['name'])
+
+                # Filter by Status:
+                if template['status'] != 'DECLINED':
+
+                    # Filter by Name to remove noAPI template:
+                    match = re.search(r'_noAPI_', template['name'])
+                    if match:
+                        pass
+                    
+                    else:
+                        # Append in appropriate List for populate:
+                        self.templates.append({template['name']:template['files'][0]['path']})
+                        if template['name'].rsplit('_')[6] == 'upscale':
+                            templates_name_upscaler.append(template['name'])
+                        else:
+                            templates_name.append(template['name'])
+
+            #Populate comboBox
+            for template in sorted(templates_name):
+                self.selectTemplate.addItem(template)
+
+            for template in sorted(templates_name_upscaler):
+                self.selectTemplate.addItem(template)
             
             # Show message and return all templates stalkname into list:
             self.statusBar.showMessage(f"Template Load for {self.selectShow.currentText()}")
+
             return self.templates
 
     def extract_params(self, json_data):
@@ -198,12 +326,12 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
         """
         Fill Basic tableView for the root parameters with:
          - Batch size default at 1
-         - Frame Range default at 1001-1100
+         - Frame Range default to N/A
         """
         
         data = [
             ('Batch Size', '1', 'The number of times the template will run'),
-            ('Frame Range', '1001-1100', 'Needs to match input range - Empty, 0 or 0-0 will run all images inside the input directory'),
+            ('Frame Range', 'N/A', 'Needs to match input range - Empty or N/A will run all images inside the input directory'),
         ]
         
         # Populate the table
@@ -213,7 +341,6 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
             self.model_rootParameters.setItem(row, 1, value_item)
             tooltip_item = QtGui.QStandardItem(str(tooltip))
             self.model_rootParameters.setItem(row, 2, tooltip_item)
-
 
     def fill_from_template(self):
         """
@@ -227,20 +354,8 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
                     self.json_path = template[str(self.selectTemplate.currentText())]
                     
                     if self.json_path:
-                        json_data = json_utils.load_json_data(self.json_path)
-                        self.extract_params(json_data)
-            
-                        for param_type, param_dict in self.params.items():
-                            for param_name, default_value in param_dict.items():
-                                # Create items for the row
-                                param_item = QtGui.QStandardItem(param_name)
-                                default_value_item = QtGui.QStandardItem(str(default_value))
-                                type_item = QtGui.QStandardItem(param_type)
-
-                                row = [param_item, default_value_item, type_item]
-                                self.model_exposedParameters.appendRow(row)
+                        self.populate_data(self.json_path)
                     break
-
 
     def export_table(self):
         """
@@ -283,14 +398,6 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
             value = self.model_rootParameters.item(row, 1).text()
             rootParameters[key] = value
 
-        command = {
-            'json_file': self.json_path,
-            'batch_size': rootParameters['Batch Size'],
-            'frame_range': rootParameters['Frame Range'],
-            'int_args':exposedParameters["int"],
-            'float_args':exposedParameters['float'],
-            'str_args':exposedParameters['str']
-            }
 
         # Define args if any and convert to JSON string, else None.
         if exposedParameters["int"]:
@@ -312,12 +419,14 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
             str_args=None
     
         frame_range = rootParameters['Frame Range']
-        if not frame_range or frame_range=='0' or frame_range=='0-0':
+        if not frame_range or frame_range=='0' or frame_range=='0-0' or frame_range=='N/A' or frame_range=='n/a':
             frame_range = None
+
+        batch_size = rootParameters['Batch Size']
 
         run = ExecuteWorkflow(
             json_file = self.json_path, 
-            batch_size= rootParameters['Batch Size'],
+            batch_size= batch_size,
             frame_range= frame_range,
             int_args=int_args,
             float_args=float_args,
@@ -325,10 +434,29 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
             remote_gui=True
             )
 
-        run.execute()
+        # Start the threaded execution with an indeterminate progress dialog
+        self.progress_dialog = QProgressDialog("Running in terminal, please wait...", None, 0, 0, self)
+        self.progress_dialog.setWindowTitle("Executing")
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModal)
+        #self.progress_dialog.setCancelButton(None)  # Remove the cancel button
+        self.progress_dialog.setMinimumDuration(0)  # Show immediately
+        self.progress_dialog.setRange(0, 100)
 
-        subprocess
+        self.thread = ExecuteWorkflowThread(run)
+        
+        # Connect thread signals to the progress dialog
+        self.thread.progress.connect(self.progress_dialog.setValue)
+        self.thread.finished.connect(self.execution_complete)
 
+        self.progress_dialog.show()
+        self.thread.start()
+
+
+
+    def execution_complete(self):
+        """Handle completion of the execution."""
+        self.progress_dialog.close()
+        QMessageBox.information(self, "Execution Complete", "The workflow execution has finished successfully.")
 
 
 if __name__ == "__main__":

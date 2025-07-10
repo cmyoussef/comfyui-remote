@@ -35,6 +35,9 @@ from ComfyUI_remote.launcher import ExecuteWorkflow
 from ComfyUI_remote.utils.common_utils import display_command
 from ComfyUI_remote.Remote_GUI.configs import config
 
+import webbrowser
+
+
 __author__ = "Romain Bouvard"
 __email__ = "rnb@dneg.com"
 __version__ = "0.1.01"
@@ -107,6 +110,12 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
         # icons:
         self.setWindowIcon(QtGui.QIcon(config.icon_path))
 
+        # Action Menu:
+        self.actionUser_Guide.triggered.connect(self.open_url)
+        self.actionTemplate_Guide.triggered.connect(self.open_url)
+        self.actionOpen_Custom_Template.triggered.connect(self.open_custom_template)
+        self.actionOpen_Local_Folder.triggered.connect(self.open_Local_folder)
+
         # variables:
         self.templates = []
         self.params = {'int': {}, 'float': {}, 'str': {}}
@@ -126,6 +135,35 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
         # Populate:
         self.connect_UI()
 
+    def open_url(self):
+        '''
+        Function to open specific URL of COMFYUI in DNET. URL currently hardcoded from actionMenu sender
+        '''
+        if self.sender().objectName() == 'actionUser_Guide':
+            url = "http://dnet.dneg.com/display/REDEFINE/comfyui_remote+GUI"
+
+        if self.sender().objectName() == 'actionTemplate_Guide':
+            url = "http://dnet.dneg.com/display/REDEFINE/02+-+dntemplates+-+advanced+cases+and+LIBRARY+available"
+            
+        webbrowser.open(url)
+
+    def open_custom_template(self):
+        '''
+        Function to build for Opening a Non Publish Template
+        Useful for User to test before publishing
+        '''
+        pass
+
+    def open_Local_folder(self):
+        """
+        Opening File System Browser to /user_data/output/ folder
+        """
+        path = "/user_data/comfyui/output"
+        if path:
+            os.system('xdg-open "%s"' % path)
+        else: 
+            self.statusBar.showMessage('/user_data/ folder not available')
+
     def clear_template(self):
         ''' Clear All Data from show update'''
         # Clear Template ComboBox:
@@ -144,7 +182,7 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
         """
         # Set the headers as numbers
         self.model_exposedParameters.setHorizontalHeaderLabels(["Parameters", "Values", "hiddenColumn"])
-        #self.tableView_ExposedArguments.hideColumn(2)
+        self.tableView_ExposedArguments.hideColumn(2)
 
         # Set the headers as numbers
         self.model_rootParameters.setHorizontalHeaderLabels(["Parameters", "Values", "Tooltip"])
@@ -166,16 +204,19 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
         self.clear_data()
         self.fill_rootParameters()
         self.fill_from_template()
-        
+    
     def query_template(self):
         """
         Load Templates from SHOW selected - Default is LIBRARY
             Return: list of Stalks - Spider Query
         """
+
         if self.selectShow.currentText()!= '':
 
             # Start the ComboBox with an Empty Entry
             self.selectTemplate.insertItem(0," ")
+            templates_name = []
+            templates_name_upscaler = []
 
             templates = pipe_query.pipequery_send(pipe_query.create_find_by_name_tags(
                 show = self.selectShow.currentText(),
@@ -185,14 +226,25 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
                 task=None
             ))
 
-            # get {names:filePath} as a LIST in self.templates
+            # get {names:filePath} as a LIST in self.templates for Status different of DECLINED:
             for template in templates['data']['latest_versions']:
-                self.templates.append({template['name']:template['files'][0]['path']})
-                #Populate comboBox
-                self.selectTemplate.addItem(template['name'])
+                if template['status'] != 'DECLINED':
+                    self.templates.append({template['name']:template['files'][0]['path']})
+                    if template['name'].rsplit('_')[6] == 'upscale':
+                        templates_name_upscaler.append(template['name'])
+                    else:
+                        templates_name.append(template['name'])
+
+            #Populate comboBox
+            for template in sorted(templates_name):
+                self.selectTemplate.addItem(template)
+
+            for template in sorted(templates_name_upscaler):
+                self.selectTemplate.addItem(template)
             
             # Show message and return all templates stalkname into list:
             self.statusBar.showMessage(f"Template Load for {self.selectShow.currentText()}")
+
             return self.templates
 
     def extract_params(self, json_data):
@@ -238,7 +290,6 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
             tooltip_item = QtGui.QStandardItem(str(tooltip))
             self.model_rootParameters.setItem(row, 2, tooltip_item)
 
-
     def fill_from_template(self):
         """
         Fill the tableView using the json_file, normalizing data to fit TableView requirement:
@@ -264,7 +315,6 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
                                 row = [param_item, default_value_item, type_item]
                                 self.model_exposedParameters.appendRow(row)
                     break
-
 
     def export_table(self):
         """
@@ -344,7 +394,7 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
             )
 
         # Start the threaded execution with an indeterminate progress dialog
-        self.progress_dialog = QProgressDialog("Running, please wait...", None, 0, 0, self)
+        self.progress_dialog = QProgressDialog("Running in terminal, please wait...", None, 0, 0, self)
         self.progress_dialog.setWindowTitle("Executing")
         self.progress_dialog.setWindowModality(QtCore.Qt.WindowModal)
         self.progress_dialog.setCancelButton(None)  # Remove the cancel button
