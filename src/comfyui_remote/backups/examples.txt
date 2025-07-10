@@ -1,5 +1,0 @@
-python text_to_image.py --json_file script_files/txt_to_img/txt2img_v001.json --positive_prompt 'a realistic cat wearing a hat' --negative_prompt 'cartoon' --steps 45 --cfg 6 --denoise 0.9 --seed 123423
-
-python image_to_image.py --json_file script_files/img_to_img/img2img_v001.json --input_dir /u/gdso/Pictures/seq_test2 --positive_prompt 'a realistic cat wearing a hat' --negative_prompt 'cartoon' --steps 20 --cfg 6 --denoise 0.9 --seed 123423 --controlnet_strength 0.7
-
-python depth_and_normals.py --json_file script_files/depth_and_normals/depth_and_normals_v001.json --input_dir /u/gdso/Pictures/seq_test
