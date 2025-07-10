@@ -3,7 +3,6 @@ import hum
 
 
 class ComfyuiRemoteTest(hum.test.TestCase):
-
     @classmethod
     def setUpClass(cls):
         """Do something before all the tests run, ie:
@@ -23,7 +22,7 @@ class ComfyuiRemoteTest(hum.test.TestCase):
         """Clean up after each test in this case"""
         pass
 
-    @hum.tag('example')
+    @hum.tag("example")
     def test_something(self):
         """An example test"""
         self.assertTrue(True)
