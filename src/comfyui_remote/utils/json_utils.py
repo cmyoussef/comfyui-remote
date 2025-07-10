@@ -3,6 +3,7 @@ import json
 import random
 from typing import Any, List
 
+
 def load_json_data(json_file: str) -> dict:
     """
     Load JSON file.
@@ -17,10 +18,11 @@ def load_json_data(json_file: str) -> dict:
         ValueError: If there is an error reading the JSON file.
     """
     try:
-        with open(json_file, 'r') as file:
+        with open(json_file, "r") as file:
             return json.load(file)
     except (FileNotFoundError, json.JSONDecodeError) as e:
         raise ValueError(f"Error reading JSON file: {e}")
+
 
 def modify_json_prompt(json_data: dict, new_pos_text: str, new_neg_text: str) -> dict:
     """
@@ -44,20 +46,24 @@ def modify_json_prompt(json_data: dict, new_pos_text: str, new_neg_text: str) ->
         # Check if the current item contains the 'inputs' key and if the 'text' matches the search text
         if value["_meta"]["title"] == "CLIP Text Encode (Positive)":
             # Modify the positive 'text' parameter
-            value['inputs']['text'] = new_pos_text
+            value["inputs"]["text"] = new_pos_text
             modified_pos = True
         if value["_meta"]["title"] == "CLIP Text Encode (Negative)":
             # Modify the negative 'text' parameter
-            value['inputs']['text'] = new_neg_text
+            value["inputs"]["text"] = new_neg_text
             modified_neg = True
     # If no modification was made, raise an error
     if not modified_pos or not modified_neg:
-        raise ValueError("'Positive' or 'Negative' title not found in any parameter. Please make sure to use the correct pre-set JSON template.")
+        raise ValueError(
+            "'Positive' or 'Negative' title not found in any parameter. Please make sure to use the correct pre-set JSON template."
+        )
     # Convert the dictionary back to a JSON string
     return json_data
 
-        
-def modify_syndata_input(json_data: dict, new_rgb_input: str, new_depth_input: str, new_mask_input: str) -> dict:
+
+def modify_syndata_input(
+    json_data: dict, new_rgb_input: str, new_depth_input: str, new_mask_input: str
+) -> dict:
     # Flag to track if modification was made
     modified_rgb = modified_depth = modified_mask = False
 
@@ -66,51 +72,62 @@ def modify_syndata_input(json_data: dict, new_rgb_input: str, new_depth_input: s
         # Check if the current item contains the 'inputs' key and if the 'text' matches the search text
         if value["_meta"]["title"] == "Load Image RGB":
             # Modify the 'image' parameter
-            value['inputs']['image'] = new_rgb_input
+            value["inputs"]["image"] = new_rgb_input
             modified_rgb = True
         if value["_meta"]["title"] == "Load Image Depth":
             # Modify the 'image' parameter
-            value['inputs']['image'] = new_depth_input
+            value["inputs"]["image"] = new_depth_input
             modified_depth = True
         if value["_meta"]["title"] == "Load Image Mask":
             # Modify the 'image' parameter
-            value['inputs']['image'] = new_mask_input
+            value["inputs"]["image"] = new_mask_input
             modified_mask = True
         if value["class_type"] in ["KSampler", "ImpactWildcardEncode"]:
-            value['inputs']['seed'] = random.randint(1, 2**64)
+            value["inputs"]["seed"] = random.randint(1, 2**64)
     # If no modification was made, raise an error
     if not modified_rgb or not modified_depth:
-        raise ValueError("'Load Image RGB' or 'Load Image Depth' title not found in any parameter. Please make sure to use the correct pre-set JSON template.")
+        raise ValueError(
+            "'Load Image RGB' or 'Load Image Depth' title not found in any parameter. Please make sure to use the correct pre-set JSON template."
+        )
     if not modified_mask:
-        raise ValueError("'Load Image Mask' title not found. Please make sure to use the correct pre-set JSON template.")
+        raise ValueError(
+            "'Load Image Mask' title not found. Please make sure to use the correct pre-set JSON template."
+        )
 
     # Convert the dictionary back to a JSON string
     return json_data
 
+
 def json_publish_script(json_data):
     # Extract all class_type values from the JSON object
     class_types = [item.get("class_type") for item in json_data.values()]
-    
+
     # Check if every class_type is either "dnString" or "dnPublisher"
     if all(class_type in {"dnString", "dnPublisher"} for class_type in class_types):
         return True
     else:
         return False
 
+
 def is_input_dir(json_data: dict) -> bool:
     # Track if input node takes a directory as input
     return any(
-        isinstance(value, dict) and value.get("class_type") in {"VHS_LoadImagesPath", "dnLoadImagePath"}
+        isinstance(value, dict)
+        and value.get("class_type") in {"VHS_LoadImagesPath", "dnLoadImagePath"}
         for value in json_data.values()
     )
+
 
 def has_input_node(json_data: dict) -> bool:
     # Track if json file has an input node
     """Check if JSON has an input node."""
     return any(
-        isinstance(value, dict) and value.get("class_type") in ["VHS_LoadImagesPath", "LoadImage", "dnLoadImage", "dnLoadImagePath"]
+        isinstance(value, dict)
+        and value.get("class_type")
+        in ["VHS_LoadImagesPath", "LoadImage", "dnLoadImage", "dnLoadImagePath"]
         for value in json_data.values()
     )
+
 
 def search_params(json_data: dict, node_class: str) -> List[str]:
     """Generalized search for int, float, and str parameters.
@@ -118,7 +135,7 @@ def search_params(json_data: dict, node_class: str) -> List[str]:
     takes as input: json data and string of class_type: dnInteger, dnString dnFloat.
 
     returns: full name of node (title)"""
-    
+
     param_list = []
     for key, value in json_data.items():
         if isinstance(value, dict) and "class_type" in value:
@@ -127,24 +144,30 @@ def search_params(json_data: dict, node_class: str) -> List[str]:
                 param_list.append(class_type)
     return param_list
 
+
 def update_values(json_data: dict, returned_args: dict) -> dict:
     """Generalized update function for int, float, and str parameters.
 
     Takes as input: json data, new param values.
     Automatically finds and updates the correct key in the inputs section."""
-    
-    title_to_key = {value['_meta']['title']: key for key, value in json_data.items() if '_meta' in value}
-    
+
+    title_to_key = {
+        value["_meta"]["title"]: key
+        for key, value in json_data.items()
+        if "_meta" in value
+    }
+
     for arg_key, arg_value in returned_args.items():
         key_to_update = title_to_key[arg_key]
-        
+
         # Automatically find the correct key within the 'inputs' dictionary
-        for input_key in json_data[key_to_update]['inputs']:
+        for input_key in json_data[key_to_update]["inputs"]:
             # Update the value for the found key
-            json_data[key_to_update]['inputs'][input_key] = arg_value
+            json_data[key_to_update]["inputs"][input_key] = arg_value
             break  # Assuming there's only one key-value pair to update per 'inputs'
 
     return json_data
+
 
 def check_output_node_type(json_data):
     """
@@ -154,7 +177,7 @@ def check_output_node_type(json_data):
         json_data (dict): The JSON data as a Python dictionary.
 
     Returns:
-        bool: True if 'dnFileOut' is found, False if 'dnSaveImage' is found, 
+        bool: True if 'dnFileOut' is found, False if 'dnSaveImage' is found,
               None if neither is found.
     """
     for key, value in json_data.items():
@@ -163,6 +186,7 @@ def check_output_node_type(json_data):
         elif value.get("class_type") == "dnSaveImage":
             return False
     return None
+
 
 def modify_json_input_dir(json_data: dict, input_ims: str) -> dict:
     """
@@ -179,7 +203,7 @@ def modify_json_input_dir(json_data: dict, input_ims: str) -> dict:
         NotADirectoryError: If the provided input_dir is not a directory.
         ValueError: If LoadImage parameter is not found in the JSON data.
     """
-    
+
     # Flag to track if modification was made
     modified = False
     for key, value in json_data.items():
@@ -202,14 +226,21 @@ def modify_json_input_dir(json_data: dict, input_ims: str) -> dict:
             if value["class_type"] == "dnLoadImage":
                 value["inputs"]["image"] = input_ims
                 modified = True
-    #If no modification was made, raise an error
+    # If no modification was made, raise an error
     if not modified:
-        raise ValueError("Neither LoadImage nor VHS_LoadImagesPath parameter found. Please make sure to use the correct pre-set JSON template.")
+        raise ValueError(
+            "Neither LoadImage nor VHS_LoadImagesPath parameter found. Please make sure to use the correct pre-set JSON template."
+        )
     return json_data
+
 
 def remove_publisher(json_data):
     # Find dnPublisher key
-    dnPublisher_key = [key for key, value in json_data.items() if value.get('class_type') == "dnPublisher"]
+    dnPublisher_key = [
+        key
+        for key, value in json_data.items()
+        if value.get("class_type") == "dnPublisher"
+    ]
 
     # Remove the keys from the JSON data
     for key in dnPublisher_key:
@@ -217,37 +248,48 @@ def remove_publisher(json_data):
 
     return json_data
 
+
 def get_dnfileout_version(data):
     # Iterate over all keys in the JSON data
     for key, value in data.items():
         # Check if the class_type is 'dnFileOut'
-        if value.get('class_type') == 'dnFileOut' or value.get('class_type') == 'dnSaveImage':
+        if (
+            value.get("class_type") == "dnFileOut"
+            or value.get("class_type") == "dnSaveImage"
+        ):
             # Return the version if it exists
-            return value.get('inputs', {}).get('version')
+            return value.get("inputs", {}).get("version")
     # If no 'dnFileOut' class_type is found, return None
     return None
+
 
 def display_json_param(json_data: dict, param: str) -> dict:
     """
     Takes as input: json data, new param values.
     Automatically finds and returns the default key in the inputs section."""
-    
-    title_to_key = {value['_meta']['title']: key for key, value in json_data.items() if '_meta' in value}
-    
+
+    title_to_key = {
+        value["_meta"]["title"]: key
+        for key, value in json_data.items()
+        if "_meta" in value
+    }
 
     key_to_update = title_to_key[param]
-    #print(f"key_to_update={key_to_update}")
-    
+    # print(f"key_to_update={key_to_update}")
+
     # Automatically find the correct key within the 'inputs' dictionary
-    for input_key in json_data[key_to_update]['inputs']:
+    for input_key in json_data[key_to_update]["inputs"]:
         # Update the value for the found key
-        default_value = json_data[key_to_update]['inputs'][input_key]
-        #print(f"default_value={default_value}")
+        default_value = json_data[key_to_update]["inputs"][input_key]
+        # print(f"default_value={default_value}")
         break  # Assuming there's only one key-value pair to update per 'inputs'
 
     return default_value
 
-def _modify_json_param(json_data: dict, class_type: str, param_name: str, new_value: Any) -> dict:
+
+def _modify_json_param(
+    json_data: dict, class_type: str, param_name: str, new_value: Any
+) -> dict:
     """
     Helper function to modify a JSON parameter.
 
@@ -271,61 +313,80 @@ def _modify_json_param(json_data: dict, class_type: str, param_name: str, new_va
                 value["inputs"][param_name] = new_value
                 modified = True
 
-    #if not modified:
-        #raise ValueError("Parameter not found. Please make sure to use the correct pre-set JSON template.")
-    
+    # if not modified:
+    # raise ValueError("Parameter not found. Please make sure to use the correct pre-set JSON template.")
+
     return json_data
+
 
 # Parameter Modification Functions
 def modify_json_steps_param(json_data: dict, steps: int) -> dict:
     """
-    Modifies the steps parameter 
+    Modifies the steps parameter
     """
     return _modify_json_param(json_data, "KSampler", "steps", steps)
 
+
 def modify_json_cfg_param(json_data: dict, cfg: int) -> dict:
     """
-    Modifies the cfg parameter 
+    Modifies the cfg parameter
     """
     return _modify_json_param(json_data, "KSampler", "cfg", cfg)
 
+
 def modify_json_denoise_param(json_data: dict, denoise: float) -> dict:
     """
-    Modifies the denoise parameter 
+    Modifies the denoise parameter
     """
     return _modify_json_param(json_data, "KSampler", "denoise", denoise)
 
+
 def modify_json_seed_param(json_data: dict, seed: int) -> dict:
     """
-    Modifies the seed parameter 
+    Modifies the seed parameter
     """
     return _modify_json_param(json_data, "KSampler", "seed", seed)
 
+
 def modify_json_controlnet_param(json_data: dict, controlnet: float) -> dict:
     """
-    Modifies the controlnet strength parameter 
+    Modifies the controlnet strength parameter
     """
     return _modify_json_param(json_data, "ControlNetApply", "strength", controlnet)
 
+
 def modify_start_frame(json_data, start_frame):
-    fileout_result = _modify_json_param(json_data, "dnFileOut", "start_frame", start_frame)
-    saveimage_result = _modify_json_param(json_data, "dnSaveImage", "start_frame", start_frame)
+    fileout_result = _modify_json_param(
+        json_data, "dnFileOut", "start_frame", start_frame
+    )
+    saveimage_result = _modify_json_param(
+        json_data, "dnSaveImage", "start_frame", start_frame
+    )
     return fileout_result, saveimage_result
+
 
 def modify_fileout_end_frame(json_data, end_frame):
     return _modify_json_param(json_data, "dnFileOut", "end_frame", end_frame)
 
+
 def modify_fileout_folder_bool(json_data, create_output_folder):
-    return _modify_json_param(json_data, "dnFileOut", "create_output_folder", create_output_folder)
+    return _modify_json_param(
+        json_data, "dnFileOut", "create_output_folder", create_output_folder
+    )
+
 
 def modify_dnloader(json_data, first_image_only):
-    return _modify_json_param(json_data, "dnLoader", "first_image_only", first_image_only)
+    return _modify_json_param(
+        json_data, "dnLoader", "first_image_only", first_image_only
+    )
+
 
 def modify_run_publisher(json_data, event_val=False):
     return _modify_json_param(json_data, "dnPublisher", "event_val", event_val)
 
-#def modify_json_output_param(json_data: dict, filename: str) -> dict:
-    #"""
-    #Modifies the controlnet strength parameter 
-    #"""
-    #return _modify_json_param(json_data, "SaveImage", "filename_prefix", filename)
+
+# def modify_json_output_param(json_data: dict, filename: str) -> dict:
+# """
+# Modifies the controlnet strength parameter
+# """
+# return _modify_json_param(json_data, "SaveImage", "filename_prefix", filename)
