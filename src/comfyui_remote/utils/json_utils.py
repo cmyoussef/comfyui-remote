@@ -88,15 +88,11 @@ def modify_syndata_input(json_data: dict, new_rgb_input: str, new_depth_input: s
     return json_data
 
 def json_publish_script(json_data):
-    # Ensure there are exactly 2 keys
-    if len(json_data) != 2:
-        return False
-    
-    # Extract the class_type values
+    # Extract all class_type values from the JSON object
     class_types = [item.get("class_type") for item in json_data.values()]
     
-    # Check if one key has class_type "dnString" and the other "dnPublisher"
-    if "dnString" in class_types and "dnPublisher" in class_types and len(class_types) == 2:
+    # Check if every class_type is either "dnString" or "dnPublisher"
+    if all(class_type in {"dnString", "dnPublisher"} for class_type in class_types):
         return True
     else:
         return False
@@ -150,6 +146,23 @@ def update_values(json_data: dict, returned_args: dict) -> dict:
 
     return json_data
 
+def check_output_node_type(json_data):
+    """
+    Reads JSON data and checks for 'dnFileOut' or 'dnSaveImage' in the 'class_type' values.
+
+    Parameters:
+        json_data (dict): The JSON data as a Python dictionary.
+
+    Returns:
+        bool: True if 'dnFileOut' is found, False if 'dnSaveImage' is found, 
+              None if neither is found.
+    """
+    for key, value in json_data.items():
+        if value.get("class_type") == "dnFileOut":
+            return True
+        elif value.get("class_type") == "dnSaveImage":
+            return False
+    return None
 
 def modify_json_input_dir(json_data: dict, input_ims: str) -> dict:
     """
@@ -213,6 +226,26 @@ def get_dnfileout_version(data):
             return value.get('inputs', {}).get('version')
     # If no 'dnFileOut' class_type is found, return None
     return None
+
+def display_json_param(json_data: dict, param: str) -> dict:
+    """
+    Takes as input: json data, new param values.
+    Automatically finds and returns the default key in the inputs section."""
+    
+    title_to_key = {value['_meta']['title']: key for key, value in json_data.items() if '_meta' in value}
+    
+
+    key_to_update = title_to_key[param]
+    #print(f"key_to_update={key_to_update}")
+    
+    # Automatically find the correct key within the 'inputs' dictionary
+    for input_key in json_data[key_to_update]['inputs']:
+        # Update the value for the found key
+        default_value = json_data[key_to_update]['inputs'][input_key]
+        #print(f"default_value={default_value}")
+        break  # Assuming there's only one key-value pair to update per 'inputs'
+
+    return default_value
 
 def _modify_json_param(json_data: dict, class_type: str, param_name: str, new_value: Any) -> dict:
     """

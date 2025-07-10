@@ -1,5 +1,7 @@
 comfyui-remote
 ==============
+v2.2.1
+* [MLSOL-45]: added new GUI for comfy
 
 v 1.0.7
 -------

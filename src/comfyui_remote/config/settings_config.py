@@ -25,7 +25,7 @@ API_COMMAND_LINE = 'bash /tools/SITE/scripts/dncomfyui'
 API_URL = '127.0.0.1'
 
 # Set this to the maximum number of connection attempts to ComfyUI you want
-MAX_COMFY_START_ATTEMPTS = 20
+MAX_COMFY_START_ATTEMPTS = 30
 
 # The waiting time for each reattempt to connect to ComfyUI
 COMFY_START_ATTEMPTS_SLEEP = 1
