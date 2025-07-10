@@ -88,15 +88,11 @@ def modify_syndata_input(json_data: dict, new_rgb_input: str, new_depth_input: s
     return json_data
 
 def json_publish_script(json_data):
-    # Ensure there are exactly 2 keys
-    if len(json_data) != 2:
-        return False
-    
-    # Extract the class_type values
+    # Extract all class_type values from the JSON object
     class_types = [item.get("class_type") for item in json_data.values()]
     
-    # Check if one key has class_type "dnString" and the other "dnPublisher"
-    if "dnString" in class_types and "dnPublisher" in class_types and len(class_types) == 2:
+    # Check if every class_type is either "dnString" or "dnPublisher"
+    if all(class_type in {"dnString", "dnPublisher"} for class_type in class_types):
         return True
     else:
         return False
@@ -150,6 +146,23 @@ def update_values(json_data: dict, returned_args: dict) -> dict:
 
     return json_data
 
+def check_output_node_type(json_data):
+    """
+    Reads JSON data and checks for 'dnFileOut' or 'dnSaveImage' in the 'class_type' values.
+
+    Parameters:
+        json_data (dict): The JSON data as a Python dictionary.
+
+    Returns:
+        bool: True if 'dnFileOut' is found, False if 'dnSaveImage' is found, 
+              None if neither is found.
+    """
+    for key, value in json_data.items():
+        if value.get("class_type") == "dnFileOut":
+            return True
+        elif value.get("class_type") == "dnSaveImage":
+            return False
+    return None
 
 def modify_json_input_dir(json_data: dict, input_ims: str) -> dict:
     """

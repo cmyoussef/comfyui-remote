@@ -6,6 +6,7 @@ package_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if package_path not in sys.path:
     sys.path.insert(0, package_path)
 from ComfyUI_remote.config import settings_config
+from ComfyUI_remote.utils.common_utils import kill_comfy_instances
 import socket
 import json
 import urllib.request
@@ -14,6 +15,7 @@ from PIL import Image
 from websocket import WebSocket # note: websocket-client (https://github.com/websocket-client/websocket-client)
 import io
 import requests
+import threading
 import time
 import os
 import subprocess
@@ -39,7 +41,7 @@ class ComfyConnector:
             cls._instance = super(ComfyConnector, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, json_file, comfyui_version):
+    def __init__(self, json_file, comfyui_version, current_iteration, total_iterations, is_interrupted, progress=0, progress_signal=None):
         """
         Initializes the ComfyConnector, starting the API server if necessary.
         """
@@ -51,8 +53,14 @@ class ComfyConnector:
             self.client_id = settings_config.INSTANCE_IDENTIFIER
             self.ws_address = f"ws://{settings_config.API_URL}:{self.urlport}/ws?clientId={self.client_id}"
             self.ws = WebSocket()
-            self.start_api()
+            self.current_iteration = current_iteration
+            self.total_iterations = total_iterations
+            self.progress = progress
+            self.progress_signal = progress_signal
+            self._is_interrupted = threading.Event()
+            self.start_api(is_interrupted)
             self.initialized = True
+            
 
     def find_available_port(self): # If the initial port is already in use, this method finds an available port to start the API server on
         """
@@ -62,8 +70,15 @@ class ComfyConnector:
             s.bind(('', 0))
             return s.getsockname()[1]
     
-    def start_api(self): # This method is used to start the API server
-        if not self.is_api_running(): # Block execution until the API server is running
+    def start_api(self, is_interrupted): # This method is used to start the API server
+        self.progress += 5
+        self.progress_signal.emit(self.progress)
+        print(f"second emit of 5% = {self.progress}%")
+        if not self.is_api_running(is_interrupted): # Block execution until the API server is running
+            if is_interrupted != False:
+                if is_interrupted():  # Dynamically check if interrupted
+                    self.interrupt()
+
             if self.comfyui_version:
                 api_command_line = settings_config.API_COMMAND_LINE + f" --version {self.comfyui_version}" + f" --port {self.urlport}" # Add the port to the command line
                 print("api_command_line={}".format(api_command_line))
@@ -72,26 +87,36 @@ class ComfyConnector:
             if self._process is None or self._process.poll() is not None: # Check if the process is not running or has terminated for some reason
                 self._process = subprocess.Popen(api_command_line.split())
                 logger.info("API process started with PID: %s", self._process.pid)
-                self.wait_for_api_to_start()
-
-    def wait_for_api_to_start(self):
+                self.wait_for_api_to_start(is_interrupted)
+        
+    def wait_for_api_to_start(self, is_interrupted):
         attempts = 0
-        while not self.is_api_running(): # Block execution until the API server is running
+        while not self.is_api_running(is_interrupted): # Block execution until the API server is running
+            if is_interrupted != False:
+                if is_interrupted():  # Dynamically check if interrupted
+                    self.interrupt()
+                    break
             if attempts >= settings_config.MAX_COMFY_START_ATTEMPTS:
                 raise RuntimeError(f"API startup procedure failed after {attempts} attempts.")
+                self.kill_api()
+                kill_comfy_instances()
             time.sleep(settings_config.COMFY_START_ATTEMPTS_SLEEP)  # Wait before checking again, for 1 second by default
             attempts += 1 # Increment the number of attempts
         logger.info(f"API startup procedure finalized after {attempts} attempts with PID {self._process.pid} in port {self.urlport}")
         time.sleep(0.5)  # Wait for 0.5 seconds before returning
 
-    def is_api_running(self): # This method is used to check if the API server is running
+    def is_api_running(self, is_interrupted): # This method is used to check if the API server is running
         try:
+            if is_interrupted != False:
+                if is_interrupted():  # Dynamically check if interrupted
+                    self.interrupt()
+                
             logger.info(f"Checking web server is running in {self.server_address}...")
             response = requests.get(self.server_address)
             if response.status_code == 200: # Check if the API server tells us it's running by returning a 200 status code
                 self.ws.connect(self.ws_address)
                 logger.info(f"Web server is running (status code 200). Now trying test image...")
-                test_image = self.generate_images(self.json_file) #settings_config.TEST_PAYLOAD
+                test_image = self.generate_images(self.json_file, self.current_iteration, is_interrupted) #settings_config.TEST_PAYLOAD
                 logger.info(f"Type of test_image: {type(test_image)}")
                 logger.info(f"Test image: {test_image}")
                 return test_image is not None  # this ensures that the API server is actually running and not just the web server
@@ -143,7 +168,8 @@ class ComfyConnector:
                 if value.get("class_type") in {"SaveImage", "dnFileOut", "dnSaveImage"}:
                     return value.get("class_type")
 
-    def generate_images(self, payload): 
+    def generate_images(self, payload, current_iteration, is_interrupted):
+
         try:
             if not self.ws.connected: 
                 logger.info("WebSocket is not connected. Reconnecting...")
@@ -152,6 +178,10 @@ class ComfyConnector:
             prompt_id = self.queue_prompt(payload)['prompt_id']
             
             while True:
+                if is_interrupted != False:
+                    if is_interrupted():  # Dynamically check if interrupted
+                        self.interrupt()
+                        break
                 out = self.ws.recv() 
                 if isinstance(out, str): 
                     message = json.loads(out)
@@ -163,14 +193,18 @@ class ComfyConnector:
             address = self.find_output_node(payload)
             history = self.get_history(prompt_id)[prompt_id]
             output_node = self.get_output_node(payload)
+            loop_progress = (current_iteration / self.total_iterations * (100 - self.progress)) + self.progress
+            self.progress_signal.emit(loop_progress)
             try:
                 if output_node == "dnFileOut":
                     filenames = eval(f"history['outputs']{address}")['images']  # Extract all images
                     print(f'Extracted images: {parsed_address["ui"]["images"]}')
 
+
                 else:
                     filenames = eval(f"history['outputs']{address}")['images']  # Extract all images
                     print(f"extracted filenames={filenames}")
+
             except Exception as e:  # Handle the inner try block error
                 #logger.error(f"Error parsing address or extracting images: {e}")
                 return []
@@ -186,6 +220,7 @@ class ComfyConnector:
                 image = Image.open(image_file)
                 images.append(image)
 
+
             return images
 
         except Exception as e:
@@ -193,6 +228,8 @@ class ComfyConnector:
             line_no = exc_traceback.tb_lineno
             error_message = f'Unhandled error at line {line_no}: {str(e)}'
             logger.error("generate_images - %s", error_message)
+            self.kill_api()
+            kill_comfy_instances()
 
     def upload_image(self, filepath, subfolder=None, folder_type=None, overwrite=False):  # This method is used to upload an image to the API server for use in img2img or controlnet
         try: 
@@ -245,3 +282,10 @@ class ComfyConnector:
         elif isinstance(json_object, list):
             for item in json_object:
                 ComfyConnector.replace_key_value(item, target_key, new_value, class_type_list, exclude)
+
+    def interrupt(self):
+        """Handle interruption logic."""
+        self._is_interrupted.set()
+        if self.is_api_running:
+            self.kill_api()
+            kill_comfy_instances()
