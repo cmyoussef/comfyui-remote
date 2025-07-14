@@ -4,6 +4,9 @@ import ast
 from pathlib import Path
 import re
 import shutil
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def transfer_imgs_from_path(im_path, temp_dir):
@@ -38,7 +41,7 @@ def transfer_imgs_from_list(im_list, temp_dir):
     imgs = []
     if im_list:
         for i in im_list:
-            print(f"i={i}")
+            logger.info(f"i={i}")
             img_name = os.path.basename(i)
             dir_path = os.path.dirname(i)
 
