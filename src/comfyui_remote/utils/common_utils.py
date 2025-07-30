@@ -3,35 +3,44 @@ import os
 import subprocess
 from pathlib import Path
 import json
-os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
+import logging
+
+logger = logging.getLogger(__name__)
+
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+
 
 def kill_comfy_instances():
     subprocess.run(
-        "ps ux | grep python | grep cuda | grep main.py | awk '{print $2}' | xargs sudo kill",
-        shell=True
+        "ps ux | grep python | grep cuda | grep gui.py | awk '{print $2}' | xargs kill",
+        shell=True,
     )
 
-def display_command(input_dirs, json_file, batch_size, frame_range, int_args, float_args, str_args):
-        command = f"dncomfyui -r --json_file {json_file} --batch_size {batch_size}"
-        if frame_range:
-            command += f" --frame_range {frame_range}"
-        if int_args:
-            command += f" --int_args '{json.dumps(int_args)}'"
 
-        if float_args:
-            command += f" --float_args '{json.dumps(float_args)}'"
+def display_command(
+    input_dirs, json_file, batch_size, frame_range, int_args, float_args, str_args
+):
+    command = f"comfyui-enroot {json_file} --batch_size {batch_size}"
+    # if frame_range:
+    #     command += f" --frame_range {frame_range}"
+    # if int_args:
+    #     command += f" --int_args '{json.dumps(int_args)}'"
 
-        if input_dirs:
-            input_key = list(input_dirs[0].keys())[0]
-            input_value = input_dirs[0][input_key]
+    # if float_args:
+    #     command += f" --float_args '{json.dumps(float_args)}'"
 
-            str_args[input_key] = input_value  # Add inputPath to str_args
-            command += f" --str_args '{json.dumps(str_args)}'"
-        else:
-            command += f" --str_args '{json.dumps(str_args)}'"
-        
-        #print(command)
-        return(str(command))
+    # if input_dirs:
+    #     input_key = list(input_dirs[0].keys())[0]
+    #     input_value = input_dirs[0][input_key]
+
+    #     str_args[input_key] = input_value  # Add inputPath to str_args
+    #     command += f" --str_args '{json.dumps(str_args)}'"
+    # else:
+    #     command += f" --str_args '{json.dumps(str_args)}'"
+
+    logger.debug(command)
+    return str(command)
+
 
 def create_sequential_folder(base_path):
     # Ensure the base path exists
@@ -49,24 +58,28 @@ def create_sequential_folder(base_path):
 
     # Create the new folder
     os.makedirs(folder_path)
-    print(f"Created folder: {folder_path}")
+    logger.info(f"Created folder: {folder_path}")
     return folder_path
+
 
 def get_latest_folder(base_path):
     # List all items in the base directory
-    folders = [f for f in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, f))]
-    
+    folders = [
+        f for f in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, f))
+    ]
+
     # Filter out folders that don't match the pattern
     numeric_folders = [f for f in folders if f.isdigit()]
-    
+
     if not numeric_folders:
         return None  # Return None if no matching folders are found
-    
+
     # Convert folder names to integers and find the max (latest)
     latest_folder = max(numeric_folders, key=int)
-    
+
     # Return the full path to the latest folder
     return os.path.join(base_path, latest_folder)
+
 
 def get_filenames(path):
     if os.path.isfile(path):
@@ -74,9 +87,14 @@ def get_filenames(path):
         return os.path.splitext(os.path.basename(path))[0]
     elif os.path.isdir(path):
         # If the path is a directory, return a list of filenames in the directory without the extensions
-        return [os.path.splitext(filename)[0] for filename in os.listdir(path) if os.path.isfile(os.path.join(path,filename))]
+        return [
+            os.path.splitext(filename)[0]
+            for filename in os.listdir(path)
+            if os.path.isfile(os.path.join(path, filename))
+        ]
     else:
         raise ValueError(f"The path {path} does not exist.")
+
 
 def extract_paths(input_dict):
     paths = []
@@ -88,73 +106,51 @@ def extract_paths(input_dict):
                 paths.append({key: value})
     return paths
 
+
 def remove_extracted_paths(input_dict, extracted_paths):
     for path_dict in extracted_paths:
         for key in path_dict:
             input_dict.pop(key, None)
     return input_dict
 
+
 def has_frame_range(folder_path):
     # List all files in the folder
     files = os.listdir(folder_path)
-    
+
     # Extract numeric parts from filenames
     numbers = []
     for file in files:
-        match = re.search(r'(\d+)(?!.*\d)', file)
+        match = re.search(r"(\d+)(?!.*\d)", file)
         if match:
             numbers.append(int(match.group(1)))
 
-    
     # If no numbers were found, return "no frame range"
     if not numbers:
-        return False #"no frame range or missing frames -- rendering all images in directory""
-    
+        return False  # "no frame range or missing frames -- rendering all images in directory""
+
     # Sort the numbers
     numbers.sort()
-    
+
     # Check if numbers form a consecutive sequence
     for i in range(1, len(numbers)):
-        if numbers[i] != numbers[i-1] + 1:
-            return False #"no frame range or missing frames -- rendering all images in directory"
-    
+        if numbers[i] != numbers[i - 1] + 1:
+            return False  # "no frame range or missing frames -- rendering all images in directory"
+
     # Return the frame range
-    return True #f"{numbers[0]}-{numbers[-1]}"
+    return True  # f"{numbers[0]}-{numbers[-1]}"
 
-def desired_frame_range(input_key):
-    while True:
-        try:
-            # Prompt the user to enter the frame range
-            frame_range = input(f"Enter the frame range (start-end) for {input_key}: ")
-
-            # Split the input into start and end frames
-            start_frame, end_frame = frame_range.split('-')
-
-            # Convert start and end frames to integers
-            start_frame = int(start_frame)
-            end_frame = int(end_frame)
-
-            # Ensure the start frame is less than or equal to the end frame
-            if start_frame > end_frame:
-                print("Error: Start frame must be less than or equal to end frame.")
-                continue
-
-            return start_frame, end_frame
-        except ValueError:
-            print("Invalid input. Please enter the frame range in the format 'start-end' with integer values.")
-        except Exception as e:
-            print(f"An unexpected error occurred: {e}")
 
 def get_filenames_in_range(directory, start, end):
     matching_filenames = []
 
     # Regular expression pattern to find a sequence of digits in the filename
-    pattern = re.compile(r'(\d+)')
+    pattern = re.compile(r"(\d+)")
 
     for filename in os.listdir(directory):
         # Find all sequences of digits in the filename
         matches = pattern.findall(filename)
-        
+
         if matches:
             # Convert all matches to integers and check if any match is within the range
             for match in matches:
@@ -166,6 +162,7 @@ def get_filenames_in_range(directory, start, end):
         raise Exception("Frame Range not found")
     else:
         return matching_filenames
+
 
 def has_extension(filepath):
     # Extract the base name from the filepath

@@ -1,6 +1,5 @@
-
 pythons = {
-    'python': ['python3'],
+    "python": ["python3"],
 }
 
-prepend_paths = ['../src']
+prepend_paths = ["../src"]

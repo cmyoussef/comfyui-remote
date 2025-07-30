@@ -16,14 +16,16 @@ _GRAPHQL_HEADERS = {
     "x-client-app-version": "0.0.0",
     "x-client-billing-code": "TESTFEAT",
     "x-client-user": getpass.getuser(),
-    "x-client-site": requests.get("http://dnsite/sitedata/key/short_name").json()["short_name"],
+    "x-client-site": requests.get("http://dnsite/sitedata/key/short_name").json()[
+        "short_name"
+    ],
     "x-client-host": platform.node(),
+}
 
-} 
 
 def pipequery_send(queries, show=None):
     """Dispatch a query to the server.
-    
+
     Args:
         query (str): graphql query
         monitor (object): Monitor object.
@@ -34,32 +36,22 @@ def pipequery_send(queries, show=None):
 
     def make_request(id, url, headers, query, results):
         request = requests.post(
-            url,
-            headers=headers,
-            data=str.encode(query),
-            timeout=None  
+            url, headers=headers, data=str.encode(query), timeout=None
         )
         result = request.json()
-        data = result['data']['latest_versions']
-        results['data']['latest_versions'].extend(data)
-
+        data = result["data"]["latest_versions"]
+        results["data"]["latest_versions"].extend(data)
 
     threads = []
-    results = {'data': {'latest_versions': []}}
+    results = {"data": {"latest_versions": []}}
     results.setdefault
     for id, query in enumerate(queries):
         threads.append(
             threading.Thread(
                 target=make_request,
-                args=(
-                    id,
-                    _PIPEQUERY_SERVER,
-                    headers,
-                    query,
-                    results
-                )
+                args=(id, _PIPEQUERY_SERVER, headers, query, results),
             )
-        ) 
+        )
     # Start each thread
     for thread in threads:
         thread.start()
@@ -86,27 +78,26 @@ def create_find_by_name_tags(show, scopes, kinds, name_tags, task=None):
     """
     queries = []
     collapsed_name_tags = "".join(
-        "{{name:\"{0}\",value:\"{1}\"}}".format(key, value)
-        for key, value in name_tags
+        '{{name:"{0}",value:"{1}"}}'.format(key, value) for key, value in name_tags
     )
 
     kind_segment = "kinds:[{0}]".format(
-        ",".join("\"{0}\"".format(kind) for kind in kinds)
+        ",".join('"{0}"'.format(kind) for kind in kinds)
     )
-    task_segment = "" if not task else "tasks:[\"{0}\"]".format(task)
+    task_segment = "" if not task else 'tasks:["{0}"]'.format(task)
 
     for scope in scopes:
         queries.append(
             "{{latest_versions("
-                "mode:VERSION_NUMBER,"
-                "show:\"{show}\","
-                "scope_names:\"{scope}\","
-                "{task_segment},"
-                "{kind_segment}"
-                "name_tags:{{"
-                    "match:EXACT,"
-                    "tags:[{collapsed_name_tags}]"
-                "}}"
+            "mode:VERSION_NUMBER,"
+            'show:"{show}",'
+            'scope_names:"{scope}",'
+            "{task_segment},"
+            "{kind_segment}"
+            "name_tags:{{"
+            "match:EXACT,"
+            "tags:[{collapsed_name_tags}]"
+            "}}"
             "){{"
             "number{{major}},"
             "name,"
@@ -116,13 +107,14 @@ def create_find_by_name_tags(show, scopes, kinds, name_tags, task=None):
             "id,"
             "kind{{id}},"
             "status"
-          "}}"
-          "}}".format(
-            scope=scope,
-            kind_segment=kind_segment,
-            task_segment=task_segment,
-            collapsed_name_tags=collapsed_name_tags,
-            show=show
-        ))
-        
+            "}}"
+            "}}".format(
+                scope=scope,
+                kind_segment=kind_segment,
+                task_segment=task_segment,
+                collapsed_name_tags=collapsed_name_tags,
+                show=show,
+            )
+        )
+
     return queries

@@ -1,1 +1,31 @@
-src/*.egg-info
+# Test
+htmlcov/
+pytest.xml
+.coverage*
+.hypothesis
+.tox
+.pytest_cache/
+
+# Build
+build/
+dist/
+*.bak
+*.pyc
+*.egg-info
+*__pycache__
+
+# Developer
+.venv/
+venv*/
+.cproject
+.project
+.pydevproject
+.settings
+.idea
+.vscode
+
+# Documentation
+doc/sphinx/*.doc.zip
+doc/sphinx/build
+doc/sphinx/source/.doctrees/
+doc/sphinx/source/reference/api
