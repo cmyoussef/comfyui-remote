@@ -1,0 +1,172 @@
+#!/bin/bash
+#
+# DNEG ComfyUI Wrapper Script
+# Runs ComfyUI inside an Enroot container.
+#
+
+# Script Configuration & Setup
+set -euo pipefail
+
+# Style and Logging Helpers
+log_header() {
+  printf "\n--- %s ---\n" "$1"
+}
+log_info() {
+  printf "› %s\n" "$1"
+}
+log_warn() {
+  printf "› WARN: %s\n" "$1"
+}
+log_error() {
+  printf "› ERROR: %s\n" >&2 "$1"
+  exit 1
+}
+
+# Default Configuration
+# DN_COMFYUI_VERSION="1.0.8"
+DN_COMFYUI_VERSION="dev"
+COMFY_VERSION="$DN_COMFYUI_VERSION"
+COMFY_BASE_PATH="/tools/SITE/rnd/comfyUI"
+
+# TODO: move to official place
+ENROOT_IMAGE="/jobs/ADGRE/2D/nvidia_pytorch_comfyui_podman:latest.sqsh"
+POSITIONAL_ARGS=()
+
+# Environment Setup
+# Suppress git warnings about repository ownership
+git config --global --add safe.directory '*' >/dev/null 2>&1
+# Disable tokenizers parallelism to prevent potential warnings/errors
+export TOKENIZERS_PARALLELISM=false
+
+# Functions
+show_help() {
+  log_header "DNEG ComfyUI Wrapper"
+  printf "Usage: dncomfyui [options] [comfyui_args]\n"
+  echo
+  printf "  -v, --version VERSION    Specify a ComfyUI version (default: ${DN_COMFYUI_VERSION})\n"
+  printf "  -h, --help               Display this help message\n"
+  echo
+  echo "All other arguments (e.g., --lowvram) are passed directly to ComfyUI."
+}
+
+is_in_container() {
+  # Check for common container indicators. Return 0 (true) on first match.
+  [ -f /.dockerenv ] && return 0
+  [ -n "${container-}${PODMAN_CONTAINER-}${ENROOT_CONTAINER-}" ] && return 0
+  grep -sq 'docker\|lxc\|podman\|containerd\|crio' /proc/1/cgroup 2>/dev/null && return 0
+  return 1 # False
+}
+
+run_enroot() {
+  local work_dir="$1"; shift
+  local extra_env_vars=()
+  while [[ $# -gt 0 && "$1" == "-e" ]]; do
+    shift
+    extra_env_vars+=("--env" "$1")
+    shift
+  done
+  local cmd=("$@")
+
+  # Set enroot cache path on the host
+  export ENROOT_CACHE_PATH="/user_data/.tmp"
+
+  # Volume mounts
+  local enroot_volumes=(
+    "--mount" "/jobs:/jobs"
+    "--mount" "/hosts:/hosts"
+    "--mount" "/user_data:/user_data"
+    "--mount" "/usr/share/fonts/truetype:/usr/share/fonts/truetype"
+    "--mount" "${COMFY_BASE_PATH}:${COMFY_BASE_PATH}"
+  )
+
+  local final_cmd=(
+      enroot start --rw --root
+      "${enroot_volumes[@]}"
+      "${extra_env_vars[@]}"
+      "$ENROOT_IMAGE"
+      "${cmd[@]}"
+  )
+
+  log_info "Executing command via Enroot..."
+  printf "    %s " "${final_cmd[0]}"
+  for arg in "${final_cmd[@]:1}"; do
+    printf "%q " "$arg"
+  done
+  printf "\n\n"
+
+  "${final_cmd[@]}"
+}
+
+# Arg Parsing
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -v|--version)
+      COMFY_VERSION="$2"
+      shift 2
+      ;;
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$COMFY_VERSION" ]]; then
+  log_error "--version requires a non-empty value."
+fi
+
+# --- Main Execution Logic ---
+log_header "Initializing DNEG ComfyUI ${COMFY_VERSION}"
+COMFY_VERSION_PATH="${COMFY_BASE_PATH}/comfyui-${COMFY_VERSION}"
+COMFY_MAIN_PY="${COMFY_VERSION_PATH}/ComfyUI/main.py"
+
+# ComfyUI arguments
+COMFY_ARGS=(
+  "--output-directory" "/user_data/comfyui/output"
+  "--input-directory"  "/user_data/comfyui/input"
+  "--temp-directory"   "/user_data/comfyui/temp"
+  "--user-directory"   "/user_data/comfyui/user"
+)
+
+# Core Python command
+python_cmd=(
+  python
+  -W "ignore::DeprecationWarning"
+  "$COMFY_MAIN_PY"
+  --disable-cuda-malloc
+  "${POSITIONAL_ARGS[@]}"
+  "${COMFY_ARGS[@]}"
+)
+
+# DNEG apptrack
+apptrack dncomfyui "$DN_COMFYUI_VERSION" --caller-argv >&/dev/null || true
+
+# Check if main.py exists before proceeding
+[ -f "$COMFY_MAIN_PY" ] || log_error "ComfyUI executable not found at: ${COMFY_MAIN_PY}"
+
+# Determine execution mode and run the command
+declare -a final_cmd
+if is_in_container; then
+  log_info "Container environment detected. Running directly."
+  cd "${COMFY_VERSION_PATH}/ComfyUI" || log_error "Could not cd into ComfyUI directory."
+  export PYTHONWARNINGS="ignore::DeprecationWarning"
+  final_cmd=( "${python_cmd[@]}" )
+else
+  log_info "Host environment detected. Using Enroot."
+  command -v enroot &>/dev/null || log_error "Enroot is not installed or not in your PATH."
+  [ -f "$ENROOT_IMAGE" ] || log_error "Enroot image not found: ${ENROOT_IMAGE}"
+
+  final_cmd=(
+    run_enroot "${COMFY_VERSION_PATH}/ComfyUI"
+    -e "PYTHONWARNINGS=ignore::DeprecationWarning"
+    "${python_cmd[@]}"
+  )
+fi
+
+# Execute the final command
+log_header "Starting ComfyUI"
+"${final_cmd[@]}"

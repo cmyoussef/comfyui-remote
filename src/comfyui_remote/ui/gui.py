@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 
 """
-Python Prototype UI to help the user to run comfyui template
+Python Prototype UI to help the user to run comfyui workflow
 """
 
 # Standard library imports
 import sys
 import os
+import logging
 import json
 import re
 import webbrowser
@@ -35,18 +36,13 @@ package_path = os.path.dirname(
 if package_path not in sys.path:
     sys.path.insert(0, package_path)
 # Local imports
-from ComfyUI_remote.utils import json_utils, pipe_query
-from ComfyUI_remote.executors.api_executor import ComfyConnector
-from ComfyUI_remote.launcher import ExecuteWorkflow
-from ComfyUI_remote.utils.common_utils import display_command
-from ComfyUI_remote.Remote_GUI.configs import config
+from comfyui_remote.utils import json_utils, pipe_query
+from comfyui_remote.executors.api_executor import ComfyConnector
+from comfyui_remote.job_runner import ExecuteWorkflow
+from comfyui_remote.utils.common_utils import display_command
+from comfyui_remote.ui.configs import config
 
-
-__author__ = "Romain Bouvard"
-__email__ = "rnb@dneg.com"
-__version__ = "0.1.01"
-__date__ = "November 2024"
-__status__ = "Dev"
+logger = logging.getLogger(__name__)
 
 # Set Primary SHOW location:
 shows = ["LIBRARY"]
@@ -103,7 +99,7 @@ class ExecuteWorkflowThread(QThread):
 
     def stop(self):
         """Request to interrupt execution."""
-        print("Interrupt signal received!")
+        logger.info("Interrupt signal received.")
         self._is_interrupted = True
         self.run_instance.interrupt()
 
@@ -121,12 +117,6 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
 
         # set UI Shows
         self.selectShow.addItems(shows)
-
-        # StyleSheet and QSS File:
-        stylesheet_file = QtCore.QFile(config.stylesheet_path)
-        stylesheet_file.open(QtCore.QFile.ReadOnly)
-        stylesheet = QtCore.QTextStream(stylesheet_file)
-        self.setStyleSheet(stylesheet.readAll())
 
         # StatusBar from QMainWindow:
         self.statusBar = QtWidgets.QStatusBar()
@@ -217,7 +207,7 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
 
         if dialog.exec_():
             selected_file = dialog.selectedFiles()[0]
-            print(f"Selected File: {selected_file}")
+            logger.info("Selected File: %s", selected_file)
 
             self.json_path = dialog.selectedFiles()[0]
 
@@ -268,7 +258,7 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
 
         self.selectShow.activated.connect(self.update_show)
         self.selectTemplate.activated.connect(self.update_table)
-        self.run.clicked.connect(self.export_table)
+        self.run.clicked.connect(self.submit_job)
 
     def update_show(self):
         """
@@ -310,7 +300,7 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
             for template in templates["data"]["latest_versions"]:
                 # Filter by Status:
                 if template["status"] != "DECLINED":
-                    # Filter by Name to remove noAPI template:
+                    # Filter by Name to remove noAPI workflow:
                     match = re.search(r"_noAPI_", template["name"])
                     if match:
                         pass
@@ -374,7 +364,7 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
         """
 
         data = [
-            ("Batch Size", "1", "The number of times the template will run"),
+            ("Batch Size", "1", "The number of times the workflow will run"),
             (
                 "Frame Range",
                 "N/A",
@@ -407,25 +397,52 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
                         self.populate_data(self.json_path)
                     break
 
-    def export_table(self):
+    def submit_job(self):
         """
         Function to export the current tableView data to dictionnary matching previous data.
-        Return: dictionnary key/values as exposed_parameters/users_inputs
+        Return: dictionary key/values as exposed_parameters/users_inputs
         """
-        # Currently not matching the self.params dictionnary formatting.
-        # Need to include Float (or empty parameters as they are ditch from the self.params)
+        float_args, int_args, str_args = self.get_user_params()
+        root_parameters = self.get_root_parameters()
+        frame_range = self.get_frame_range(root_parameters)
+        batch_size = root_parameters["Batch Size"]
 
-        # Export Exposed Parameters:
-        """
-        exposedParameters = {"int": [], "float": [], "str": [], "other": {}}
-        for row in range(self.model_exposedParameters.rowCount()):
-            key = self.model_exposedParameters.item(row, 2).text()  # Access the hidden column
-            name = self.model_exposedParameters.item(row, 0).text()  # Access 'Name' (column 0)
-            value = self.model_exposedParameters.item(row, 1).text()  # Access 'Value' (column 1)
-            exposedParameters[key]={name: value}  # Group as dicts
-        """
+        run = ExecuteWorkflow(
+            json_file=self.json_path,
+            batch_size=batch_size,
+            comfyui_version=None,
+            frame_range=frame_range,
+            int_args=int_args,
+            float_args=float_args,
+            str_args=str_args,
+        )
+
+        # Start the threaded execution with an indeterminate progress dialog
+        self.progress_dialog = QProgressDialog(
+            "Running in terminal, please wait...", None, 0, 0, self
+        )
+        self.progress_dialog.setWindowTitle("Executing")
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModal)
+        # self.progress_dialog.setCancelButton(None)  # Remove the cancel button
+        self.progress_dialog.setCancelButtonText("Interrupt")
+        self.progress_dialog.canceled.connect(self.interrupt_execution)
+        self.progress_dialog.setMinimumDuration(0)  # Show immediately
+        self.progress_dialog.setRange(0, 100)
+
+        self.thread = ExecuteWorkflowThread(run)
+
+        # Connect thread signals to the progress dialog
+        self.thread.progress.connect(self.progress_dialog.setValue)
+        # Ensure dialog closes when execution finishes or is interrupted
+        self.thread.finished.connect(self.progress_dialog.close)
+        self.thread.interrupted.connect(self.progress_dialog.close)
+        self.thread.finished.connect(self.execution_complete)
+
+        self.progress_dialog.show()
+        self.thread.start()
+
+    def get_user_params(self):
         exposedParameters = {"int": {}, "float": {}, "str": {}, "other": {}}
-
         for row in range(self.model_exposedParameters.rowCount()):
             key = self.model_exposedParameters.index(
                 row, 0
@@ -445,33 +462,34 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
 
             elif hidden_data == "str":
                 exposedParameters["str"][key] = str(value)
-
-        # Export Roots Parameters:
-        rootParameters = defaultdict()
-        for row in range(self.model_rootParameters.rowCount()):
-            key = self.model_rootParameters.item(row, 0).text()
-            value = self.model_rootParameters.item(row, 1).text()
-            rootParameters[key] = value
-
         # Define args if any and convert to JSON string, else None.
         if exposedParameters["int"]:
             int_args = exposedParameters["int"]
             int_args = json.dumps(int_args)
         else:
             int_args = None
-
         if exposedParameters["float"]:
             float_args = exposedParameters["float"]
             float_args = json.dumps(float_args)
         else:
             float_args = None
-
         if exposedParameters["str"]:
             str_args = exposedParameters["str"]
             str_args = json.dumps(str_args)
         else:
             str_args = None
+        return float_args, int_args, str_args
 
+    def get_root_parameters(self):
+        # Export Roots Parameters:
+        rootParameters = defaultdict()
+        for row in range(self.model_rootParameters.rowCount()):
+            key = self.model_rootParameters.item(row, 0).text()
+            value = self.model_rootParameters.item(row, 1).text()
+            rootParameters[key] = value
+        return rootParameters
+
+    def get_frame_range(self, rootParameters):
         frame_range = rootParameters["Frame Range"]
         if (
             not frame_range
@@ -481,39 +499,7 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
             or frame_range == "n/a"
         ):
             frame_range = None
-
-        batch_size = rootParameters["Batch Size"]
-
-        run = ExecuteWorkflow(
-            json_file=self.json_path,
-            batch_size=batch_size,
-            frame_range=frame_range,
-            int_args=int_args,
-            float_args=float_args,
-            str_args=str_args,
-            remote_gui=True,
-        )
-
-        # Start the threaded execution with an indeterminate progress dialog
-        self.progress_dialog = QProgressDialog(
-            "Running in terminal, please wait...", None, 0, 0, self
-        )
-        self.progress_dialog.setWindowTitle("Executing")
-        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModal)
-        # self.progress_dialog.setCancelButton(None)  # Remove the cancel button
-        self.progress_dialog.setCancelButtonText("Interrupt")
-        self.progress_dialog.canceled.connect(self.interrupt_execution)
-        self.progress_dialog.setMinimumDuration(0)  # Show immediately
-        self.progress_dialog.setRange(0, 100)
-
-        self.thread = ExecuteWorkflowThread(run)
-
-        # Connect thread signals to the progress dialog
-        self.thread.progress.connect(self.progress_dialog.setValue)
-        self.thread.finished.connect(self.execution_complete)
-
-        self.progress_dialog.show()
-        self.thread.start()
+        return frame_range
 
     def execution_complete(self):
         """Handle completion of the execution."""

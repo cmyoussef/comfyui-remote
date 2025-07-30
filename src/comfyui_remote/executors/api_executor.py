@@ -1,5 +1,19 @@
 import os
 import sys
+import signal
+import socket
+import json
+import urllib.request
+import urllib.parse
+from PIL import Image
+import io
+import requests
+import threading
+import time
+import subprocess
+import logging
+
+from comfyui_remote.executors.websocket import WSProtoWrapper
 
 # Get the absolute path of the package.
 package_path = os.path.dirname(
@@ -8,30 +22,9 @@ package_path = os.path.dirname(
 # This is done by inserting the local package path at the beginning of sys.path, which gives it precedence over installed packages.
 if package_path not in sys.path:
     sys.path.insert(0, package_path)
-from ComfyUI_remote.config import settings_config
-from ComfyUI_remote.utils.common_utils import kill_comfy_instances
-import socket
-import json
-import urllib.request
-import urllib.parse
-from PIL import Image
-from websocket import (
-    WebSocket,
-)  # note: websocket-client (https://github.com/websocket-client/websocket-client)
-import io
-import requests
-import threading
-import time
-import os
-import subprocess
-from typing import List
-import sys
-import logging
-import ast
+from comfyui_remote.config import settings_config
+from comfyui_remote.utils.common_utils import kill_comfy_instances
 
-os.environ["PYTHONPATH"] = ""
-
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -61,6 +54,7 @@ class ComfyConnector:
         """
         Initializes the ComfyConnector, starting the API server if necessary.
         """
+        # debugpy.debug_this_thread()
         if not hasattr(self, "initialized"):
             self.json_file = json_file
             self.comfyui_version = comfyui_version
@@ -68,7 +62,7 @@ class ComfyConnector:
             self.server_address = f"http://{settings_config.API_URL}:{self.urlport}"
             self.client_id = settings_config.INSTANCE_IDENTIFIER
             self.ws_address = f"ws://{settings_config.API_URL}:{self.urlport}/ws?clientId={self.client_id}"
-            self.ws = WebSocket()
+            self.ws = WSProtoWrapper()  # Use our wsproto wrapper
             self.current_iteration = current_iteration
             self.total_iterations = total_iterations
             self.progress = progress
@@ -90,7 +84,7 @@ class ComfyConnector:
     def start_api(self, is_interrupted):  # This method is used to start the API server
         self.progress += 5
         self.progress_signal.emit(self.progress)
-        print(f"second emit of 5% = {self.progress}%")
+        logger.info(f"second emit of 5% = {self.progress}%")
         if not self.is_api_running(
             is_interrupted
         ):  # Block execution until the API server is running
@@ -104,7 +98,7 @@ class ComfyConnector:
                     + f" --version {self.comfyui_version}"
                     + f" --port {self.urlport}"
                 )  # Add the port to the command line
-                print("api_command_line={}".format(api_command_line))
+                logger.info("api_command_line={}".format(api_command_line))
             else:
                 api_command_line = (
                     settings_config.API_COMMAND_LINE + f" --port {self.urlport}"
@@ -112,9 +106,131 @@ class ComfyConnector:
             if (
                 self._process is None or self._process.poll() is not None
             ):  # Check if the process is not running or has terminated for some reason
-                self._process = subprocess.Popen(api_command_line.split())
-                logger.info("API process started with PID: %s", self._process.pid)
+                # Log additional debugging information
+                logger.info(f"Starting API process with command: {api_command_line}")
+                logger.info(f"Current working directory: {os.getcwd()}")
+
+                # Store command for debugging
+                self._last_command = api_command_line
+
+                try:
+                    # For bash scripts, we need to handle the case where the script might exit early
+                    # Let's run with explicit bash and capture more environment information
+                    cmd_parts = api_command_line.split()
+                    if cmd_parts[0] == "bash" and len(cmd_parts) > 1:
+                        # This is a bash script, run it with better error handling
+                        script_path = cmd_parts[1]
+                        script_args = cmd_parts[2:] if len(cmd_parts) > 2 else []
+
+                        # Test if the script exists and is executable
+                        if not os.path.exists(script_path):
+                            # Try to find it in PATH or relative to current directory
+                            potential_paths = [
+                                os.path.join(os.getcwd(), script_path),
+                                os.path.join(
+                                    os.path.dirname(__file__),
+                                    "..",
+                                    "..",
+                                    "..",
+                                    "bin",
+                                    script_path,
+                                ),
+                            ]
+                            for path in potential_paths:
+                                if os.path.exists(path):
+                                    script_path = path
+                                    logger.info(f"Found script at: {script_path}")
+                                    break
+                            else:
+                                logger.error(
+                                    f"Script not found: {script_path} in any of {potential_paths}"
+                                )
+
+                        # Run with explicit bash and capture exit codes
+                        full_command = ["bash", "-x", script_path] + script_args
+                        logger.info(f"Executing with explicit bash: {full_command}")
+
+                        self._process = subprocess.Popen(
+                            full_command,
+                            preexec_fn=os.setsid,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            bufsize=1,
+                        )
+                    else:
+                        # Not a bash script, run normally
+                        self._process = subprocess.Popen(
+                            api_command_line.split(),
+                            preexec_fn=os.setsid,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            bufsize=1,
+                        )
+
+                    logger.info("API process started with PID: %s", self._process.pid)
+
+                    # Immediately check if the process is still alive
+                    time.sleep(0.1)  # Give it a moment
+                    exit_code = self._process.poll()
+                    if exit_code is not None:
+                        logger.error(
+                            f"Process immediately exited with code: {exit_code}"
+                        )
+                    else:
+                        logger.info("Process appears to be running after initial check")
+
+                except Exception as e:
+                    logger.error(f"Failed to start API process: {e}")
+                    raise
+
+                # Initialize output capture for error reporting
+                self._captured_stdout = []
+                self._captured_stderr = []
+
+                # Start threads to stream and capture output
+                self._stdout_thread = threading.Thread(
+                    target=self._stream_output,
+                    args=(self._process.stdout, "STDOUT", self._captured_stdout),
+                    daemon=True,
+                )
+                self._stderr_thread = threading.Thread(
+                    target=self._stream_output,
+                    args=(self._process.stderr, "STDERR", self._captured_stderr),
+                    daemon=True,
+                )
+                self._stdout_thread.start()
+                self._stderr_thread.start()
+
                 self.wait_for_api_to_start(is_interrupted)
+
+    def _stream_output(self, pipe, stream_type, capture_list):
+        """Stream process output to logger while capturing it for error reporting."""
+        try:
+            for line in iter(pipe.readline, ""):
+                if line:
+                    line = line.rstrip("\n\r")
+                    # Log the output using the logger
+                    # ComfyUI writes normal output to STDERR, so treat both as INFO unless it's clearly an error
+                    if any(
+                        error_indicator in line.lower()
+                        for error_indicator in [
+                            "error",
+                            "failed",
+                            "exception",
+                            "traceback",
+                        ]
+                    ):
+                        logger.error(f"ComfyUI {stream_type}: {line}")
+                    else:
+                        logger.info(f"ComfyUI {stream_type}: {line}")
+                    # Also capture for error reporting
+                    capture_list.append(line)
+        except Exception as e:
+            logger.error(f"Error streaming {stream_type}: {e}")
+        finally:
+            pipe.close()
 
     def wait_for_api_to_start(self, is_interrupted):
         attempts = 0
@@ -125,18 +241,81 @@ class ComfyConnector:
                 if is_interrupted():  # Dynamically check if interrupted
                     self.interrupt()
                     break
+
+            # Check if the process has terminated with an error
+            if self._process is not None:
+                exit_code = self._process.poll()
+                if exit_code is not None and exit_code != 0:
+                    # Process has terminated with a non-zero exit code
+                    # Wait a bit for output threads to capture final messages
+                    time.sleep(0.5)
+
+                    # Log the error but don't immediately fail - enroot errors might be non-fatal
+                    error_msg = f"API startup script exited with code {exit_code}."
+                    if hasattr(self, "_captured_stderr") and self._captured_stderr:
+                        stderr_output = "\n".join(
+                            self._captured_stderr[-10:]
+                        )  # Last 10 lines
+                        error_msg += f" Error output: {stderr_output}"
+                    else:
+                        error_msg += " No error output captured."
+                    if hasattr(self, "_captured_stdout") and self._captured_stdout:
+                        stdout_output = "\n".join(
+                            self._captured_stdout[-10:]
+                        )  # Last 10 lines
+                        error_msg += f" Standard output: {stdout_output}"
+                    else:
+                        error_msg += " No standard output captured."
+
+                    # Additional debugging for farm environment
+                    logger.warning(f"Process exit debugging info:")
+                    logger.warning(
+                        f"  - Process PID: {self._process.pid if self._process else 'None'}"
+                    )
+                    logger.warning(f"  - Exit code: {exit_code}")
+                    logger.warning(
+                        f"  - Command executed: {getattr(self, '_last_command', 'Unknown')}"
+                    )
+                    logger.warning(f"  - Working directory: {os.getcwd()}")
+
+                    logger.warning(
+                        f"Process exited early but continuing to check API availability: {error_msg}"
+                    )
+
+                    # Only fail immediately if we've tried for a reasonable number of attempts
+                    # This allows for enroot initialization errors that don't prevent ComfyUI from starting
+                    if attempts >= (settings_config.MAX_COMFY_START_ATTEMPTS // 2):
+                        self.kill_api()
+                        kill_comfy_instances()
+                        raise RuntimeError(
+                            f"API startup script failed after process exit and {attempts} attempts. {error_msg}"
+                        )
+
             if attempts >= settings_config.MAX_COMFY_START_ATTEMPTS:
-                raise RuntimeError(
-                    f"API startup procedure failed after {attempts} attempts."
-                )
+                # Get process output for debugging if available
+                error_msg = f"API startup procedure failed after {attempts} attempts."
+                if hasattr(self, "_captured_stderr") and self._captured_stderr:
+                    stderr_output = "\n".join(
+                        self._captured_stderr[-10:]
+                    )  # Last 10 lines
+                    error_msg += f" Error output: {stderr_output}"
+                if hasattr(self, "_captured_stdout") and self._captured_stdout:
+                    stdout_output = "\n".join(
+                        self._captured_stdout[-10:]
+                    )  # Last 10 lines
+                    error_msg += f" Standard output: {stdout_output}"
+
                 self.kill_api()
                 kill_comfy_instances()
+                raise RuntimeError(error_msg)
+
             time.sleep(
                 settings_config.COMFY_START_ATTEMPTS_SLEEP
             )  # Wait before checking again, for 1 second by default
             attempts += 1  # Increment the number of attempts
+        pid_info = f"PID {self._process.pid}" if self._process else "no active process"
         logger.info(
-            f"API startup procedure finalized after {attempts} attempts with PID {self._process.pid} in port {self.urlport}"
+            f"API startup procedure finalized after {attempts} attempts with {pid_info} in port {self.urlport}"
         )
         time.sleep(0.5)  # Wait for 0.5 seconds before returning
 
@@ -167,26 +346,47 @@ class ComfyConnector:
                 )  # this ensures that the API server is actually running and not just the web server
         except Exception as e:
             pass
-            # logger.error("API not running:", e)
         return False
 
     def kill_api(self):
         # This method kills the API server process, closes the WebSocket connection, and resets instance-specific attributes.
         try:
-            if self._process is not None and self._process.poll() is None:
-                self._process.kill()
-                logger.info("kill_api: API process killed.")
+            # Close WebSocket connection first, before killing the process
             if self.ws and self.ws.connected:
                 self.ws.close()
                 logger.info("kill_api: WebSocket connection closed.")
+                # Give a short delay for the close handshake to complete
+                time.sleep(0.1)
+
+            # Then kill the API process
+            if self._process is not None and self._process.poll() is None:
+                os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
+                logger.info("kill_api: API process group killed.")
         except Exception as e:
             logger.error(f"kill_api: Warning: The following issues occurred: {e}")
         finally:
+            # Clean up output streaming threads
+            if hasattr(self, "_stdout_thread") and self._stdout_thread.is_alive():
+                try:
+                    self._stdout_thread.join(timeout=1.0)
+                except Exception:
+                    pass
+            if hasattr(self, "_stderr_thread") and self._stderr_thread.is_alive():
+                try:
+                    self._stderr_thread.join(timeout=1.0)
+                except Exception:
+                    pass
+
             self._process = None
             self.ws = None
             self.urlport = None
             self.server_address = None
             self.client_id = None
+            # Clean up capture lists
+            if hasattr(self, "_captured_stdout"):
+                self._captured_stdout = None
+            if hasattr(self, "_captured_stderr"):
+                self._captured_stderr = None
             ComfyConnector._instance = None
             logger.info("kill_api: Cleanup complete.")
 
@@ -238,7 +438,14 @@ class ComfyConnector:
                     if is_interrupted():  # Dynamically check if interrupted
                         self.interrupt()
                         break
-                out = self.ws.recv()
+
+                # Receive WebSocket message with timeout
+                try:
+                    out = self.ws.recv(timeout=30.0)  # 30 second timeout
+                except TimeoutError:
+                    logger.warning("WebSocket receive timeout, continuing...")
+                    continue
+
                 if isinstance(out, str):
                     message = json.loads(out)
                     if message["type"] == "executing":
@@ -253,32 +460,32 @@ class ComfyConnector:
                 current_iteration / self.total_iterations * (100 - self.progress)
             ) + self.progress
             self.progress_signal.emit(loop_progress)
-            try:
-                if output_node == "dnFileOut":
-                    filenames = eval(f"history['outputs']{address}")[
-                        "images"
-                    ]  # Extract all images
-                    print(f"Extracted images: {parsed_address['ui']['images']}")
+            # try:
+            #     if output_node == "dnFileOut":
+            #         filenames = eval(f"history['outputs']{address}")[
+            #             "images"
+            #         ]  # Extract all images
+            #         logger.info(f"Extracted images: {filenames}")
 
-                else:
-                    filenames = eval(f"history['outputs']{address}")[
-                        "images"
-                    ]  # Extract all images
-                    print(f"extracted filenames={filenames}")
+            #     else:
+            #         filenames = eval(f"history['outputs']{address}")[
+            #             "images"
+            #         ]  # Extract all images
+            #         logger.info(f"extracted filenames={filenames}")
 
-            except Exception as e:  # Handle the inner try block error
-                # logger.error(f"Error parsing address or extracting images: {e}")
-                return []
+            # except Exception as e:  # Handle the inner try block error
+            #     logger.error(f"Error parsing address or extracting images: {e}")
+            #     return []
             images = []  # Initialize images list outside the inner try block
 
-            for img_info in filenames:
-                filename = img_info["filename"]
-                subfolder = img_info["subfolder"]
-                folder_type = img_info["type"]
-                image_data = self.get_image(filename, subfolder, folder_type)
-                image_file = io.BytesIO(image_data)
-                image = Image.open(image_file)
-                images.append(image)
+            # for img_info in filenames:
+            #     filename = img_info["filename"]
+            #     subfolder = img_info["subfolder"]
+            #     folder_type = img_info["type"]
+            #     image_data = self.get_image(filename, subfolder, folder_type)
+            #     image_file = io.BytesIO(image_data)
+            #     image = Image.open(image_file)
+            #     images.append(image)
 
             return images
 
@@ -331,7 +538,9 @@ class ComfyConnector:
     ):  # This method is used to edit the payload of a prompt
         # Check if the current value is a dictionary and apply the logic recursively
         if isinstance(json_object, dict):
-            class_type = value.get("class_type")
+            class_type = json_object.get(
+                "class_type"
+            )  # Fixed: was using undefined 'value'
             # Determine whether to apply the logic based on exclude and class_type_list
             should_apply_logic = (
                 exclude
@@ -358,6 +567,6 @@ class ComfyConnector:
     def interrupt(self):
         """Handle interruption logic."""
         self._is_interrupted.set()
-        if self.is_api_running:
+        if self.ws and self.ws.connected:
             self.kill_api()
             kill_comfy_instances()

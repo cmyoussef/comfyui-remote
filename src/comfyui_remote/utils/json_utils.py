@@ -1,7 +1,10 @@
 import os
 import json
 import random
+import logging
 from typing import Any, List
+
+logger = logging.getLogger(__name__)
 
 
 def load_json_data(json_file: str) -> dict:
@@ -55,7 +58,7 @@ def modify_json_prompt(json_data: dict, new_pos_text: str, new_neg_text: str) ->
     # If no modification was made, raise an error
     if not modified_pos or not modified_neg:
         raise ValueError(
-            "'Positive' or 'Negative' title not found in any parameter. Please make sure to use the correct pre-set JSON template."
+            "'Positive' or 'Negative' title not found in any parameter. Please make sure to use the correct pre-set JSON workflow."
         )
     # Convert the dictionary back to a JSON string
     return json_data
@@ -87,11 +90,11 @@ def modify_syndata_input(
     # If no modification was made, raise an error
     if not modified_rgb or not modified_depth:
         raise ValueError(
-            "'Load Image RGB' or 'Load Image Depth' title not found in any parameter. Please make sure to use the correct pre-set JSON template."
+            "'Load Image RGB' or 'Load Image Depth' title not found in any parameter. Please make sure to use the correct pre-set JSON workflow."
         )
     if not modified_mask:
         raise ValueError(
-            "'Load Image Mask' title not found. Please make sure to use the correct pre-set JSON template."
+            "'Load Image Mask' title not found. Please make sure to use the correct pre-set JSON workflow."
         )
 
     # Convert the dictionary back to a JSON string
@@ -229,7 +232,7 @@ def modify_json_input_dir(json_data: dict, input_ims: str) -> dict:
     # If no modification was made, raise an error
     if not modified:
         raise ValueError(
-            "Neither LoadImage nor VHS_LoadImagesPath parameter found. Please make sure to use the correct pre-set JSON template."
+            "Neither LoadImage nor VHS_LoadImagesPath parameter found. Please make sure to use the correct pre-set JSON workflow."
         )
     return json_data
 
@@ -275,13 +278,13 @@ def display_json_param(json_data: dict, param: str) -> dict:
     }
 
     key_to_update = title_to_key[param]
-    # print(f"key_to_update={key_to_update}")
+    logger.debug(f"key_to_update={key_to_update}")
 
     # Automatically find the correct key within the 'inputs' dictionary
     for input_key in json_data[key_to_update]["inputs"]:
         # Update the value for the found key
         default_value = json_data[key_to_update]["inputs"][input_key]
-        # print(f"default_value={default_value}")
+        logger.debug(f"default_value={default_value}")
         break  # Assuming there's only one key-value pair to update per 'inputs'
 
     return default_value
@@ -314,7 +317,7 @@ def _modify_json_param(
                 modified = True
 
     # if not modified:
-    # raise ValueError("Parameter not found. Please make sure to use the correct pre-set JSON template.")
+    # raise ValueError("Parameter not found. Please make sure to use the correct pre-set JSON workflow.")
 
     return json_data
 

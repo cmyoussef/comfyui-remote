@@ -1,10 +1,10 @@
 import os, shutil
-import cv2
-import numpy as np
 from pathlib import Path
 import re
-
+import logging
 ### Cache Utils ###
+
+logger = logging.getLogger(__name__)
 
 
 def update_cache(cache_dir):
@@ -24,7 +24,7 @@ def update_cache(cache_dir):
                 elif os.path.isdir(file_path):
                     shutil.rmtree(file_path)
             except Exception as e:
-                print("Failed to delete %s. Reason: %s" % (file_path, e))
+                logger.error("Failed to delete %s. Reason: %s" % (file_path, e))
 
 
 def transfer_imgs_from_path(im_path, temp_dir):
@@ -53,7 +53,7 @@ def transfer_imgs_from_list(im_list, temp_dir):
     imgs = []
     if im_list:
         for i in im_list:
-            print(f"i={i}")
+            logger.info(f"i={i}")
             img_name = os.path.basename(i)
             dir_path = os.path.dirname(i)
 
@@ -222,4 +222,4 @@ def copy_matching_files(input_path, cache_dir):
             src_path = os.path.join(base_dir, file_name)
             dest_path = os.path.join(cache_dir, file_name)
             shutil.copy(src_path, dest_path)
-            print(f"Copied: {src_path} -> {dest_path}")
+            logger.info(f"Copied: {src_path} -> {dest_path}")

@@ -19,18 +19,18 @@ local_comfy_temp = os.path.join(local_comfy_path, "temp")
 # Name of the application
 APP_NAME = os.path.basename(DIR_PATH)
 
-# Command line to start the API server, e.g. "python3 ComfyUI/main.py"; warning: do not add parameter --port as it will be passed later
-# API_COMMAND_LINE = '/tools/SITE/rnd/comfyUI/comfyui-1.0.3/bin/python3 /tools/SITE/rnd/comfyUI/comfyui-1.0.3/ComfyUI/main.py --disable-cuda-malloc'
-API_COMMAND_LINE = "bash /tools/SITE/scripts/dncomfyui"
+# Command line to start the API server, e.g. "python3 ComfyUI/gui.py"; warning: do not add parameter --port as it will be passed later
+COMFY_REMOTE_BOB_TARGET = "platform-pipe5-1"
+API_COMMAND_LINE = "comfyui"
 
 # URL of the API server (warning: do not add the port number to the URL as it will be passed later)
 API_URL = "127.0.0.1"
 
 # Set this to the maximum number of connection attempts to ComfyUI you want
-MAX_COMFY_START_ATTEMPTS = 30
+MAX_COMFY_START_ATTEMPTS = 40
 
 # The waiting time for each reattempt to connect to ComfyUI
-COMFY_START_ATTEMPTS_SLEEP = 1
+COMFY_START_ATTEMPTS_SLEEP = 4
 
 # Unique identifier for this instance of the worker; used in the WebSocket connection
 INSTANCE_IDENTIFIER = APP_NAME + "-" + str(uuid.uuid4())
