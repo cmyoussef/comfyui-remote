@@ -3,6 +3,7 @@
 import getpass
 import platform
 import threading
+
 import requests
 
 _PIPEQUERY_SERVER = "http://pipequery.zro.dneg.com/v1/graphql"
