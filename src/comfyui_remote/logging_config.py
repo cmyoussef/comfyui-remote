@@ -4,8 +4,8 @@ import logging
 import os
 import sys
 
-from dnlogging.handlers import ColoredStreamHandler
 from dnlogging.formatters import DnFormatter, DEFAULT_LOG_FORMAT
+from dnlogging.handlers import ColoredStreamHandler
 
 
 def setup_logging(level=logging.INFO, debug=False, stdout=True, logfile=False):

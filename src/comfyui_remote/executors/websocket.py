@@ -20,8 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 class WSProtoWrapper:
-    """
-    A wrapper around wsproto to provide a websocket-client-like interface
+    """A wrapper around wsproto to provide a websocket-client-like interface.
+
+    This class implements a simple WebSocket client using the wsproto library,
+    providing methods similar to the websocket-client library for sending and
+    receiving messages over WebSocket connections.
     """
 
     def __init__(self):
@@ -32,33 +35,36 @@ class WSProtoWrapper:
         self._connection_established = False
 
     def connect(self, url: str, timeout: float = 10.0):
-        """Connect to WebSocket server using wsproto"""
+        """Connect to WebSocket server using wsproto.
+
+        Args:
+            url: WebSocket URL to connect to (ws:// or wss://)
+            timeout: Connection timeout in seconds
+
+        Raises:
+            ConnectionError: If connection fails or is rejected
+            TimeoutError: If handshake times out
+        """
         try:
-            # Parse WebSocket URL
             parsed = urlparse(url)
             host = parsed.hostname
             port = parsed.port or (443 if parsed.scheme == "wss" else 80)
 
-            # Create socket connection
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.settimeout(timeout)
             self.socket.connect((host, port))
 
-            # Create wsproto connection
             self.ws_connection = WSConnection(ConnectionType.CLIENT)
 
-            # Create WebSocket handshake request
             target = parsed.path
             if parsed.query:
                 target += "?" + parsed.query
 
             request = Request(host=host, target=target)
 
-            # Send handshake
             data_to_send = self.ws_connection.send(request)
             self.socket.send(data_to_send)
 
-            # Wait for handshake response
             start_time = time.time()
             while (
                 not self._connection_established
@@ -76,13 +82,11 @@ class WSProtoWrapper:
                         if isinstance(event, AcceptConnection):
                             self._connection_established = True
                             self.connected = True
-                            logger.info("WebSocket connection established")
                             break
                         elif isinstance(event, CloseConnection):
                             raise ConnectionError(
                                 f"Connection rejected: {event.code} {event.reason}"
                             )
-                        # Handle potential early pings (unlikely but robust)
                         elif isinstance(event, Ping):
                             self.socket.send(
                                 self.ws_connection.send(Pong(event.payload))
@@ -101,7 +105,14 @@ class WSProtoWrapper:
             raise e
 
     def send(self, message: str):
-        """Send text message"""
+        """Send text message over the WebSocket connection.
+
+        Args:
+            message: Text message to send
+
+        Raises:
+            ConnectionError: If WebSocket is not connected
+        """
         if not self.connected or not self.ws_connection:
             raise ConnectionError("WebSocket not connected")
 
@@ -114,28 +125,36 @@ class WSProtoWrapper:
             raise e
 
     def recv(self, timeout: Optional[float] = None) -> str:
-        """Receive message (blocking)"""
+        """Receive message from the WebSocket connection (blocking).
+
+        Args:
+            timeout: Optional timeout in seconds. If None, blocks indefinitely
+
+        Returns:
+            Received text message
+
+        Raises:
+            ConnectionError: If WebSocket is not connected or connection is closed
+            TimeoutError: If timeout expires before receiving a message
+        """
         if not self.connected or not self.ws_connection:
             raise ConnectionError("WebSocket not connected")
 
-        # Check if we have buffered messages
         if self._received_messages:
             return self._received_messages.pop(0)
 
-        # Set socket timeout
         original_timeout = self.socket.gettimeout()
         if timeout is not None:
             self.socket.settimeout(timeout)
 
         try:
             while self.connected:
-                # Use select for non-blocking check with timeout
                 ready = select.select([self.socket], [], [], timeout or 1.0)[0]
 
                 if not ready:
                     if timeout is not None:
                         raise TimeoutError("Receive timeout")
-                    continue  # Continue loop if no timeout specified
+                    continue
 
                 data = self.socket.recv(4096)
                 if not data:
@@ -144,7 +163,6 @@ class WSProtoWrapper:
 
                 self.ws_connection.receive_data(data)
 
-                # Process ALL events from the data
                 for event in self.ws_connection.events():
                     if isinstance(event, TextMessage):
                         self._received_messages.append(event.data)
@@ -155,14 +173,13 @@ class WSProtoWrapper:
                         data_to_send = self.ws_connection.send(pong_event)
                         self.socket.send(data_to_send)
                     elif isinstance(event, Pong):
-                        pass  # Ignore unsolicited pongs
+                        pass
                     elif isinstance(event, CloseConnection):
                         self.connected = False
                         raise ConnectionError(
                             f"Connection closed: {event.code} {event.reason or ''}"
                         )
 
-                # Return the first buffered message if available
                 if self._received_messages:
                     return self._received_messages.pop(0)
 
@@ -171,24 +188,21 @@ class WSProtoWrapper:
                 self.connected = False
             raise e
         finally:
-            # Restore original timeout
             self.socket.settimeout(original_timeout)
 
+        raise ConnectionError("Connection lost while waiting for message")
+
     def close(self):
-        """Close WebSocket connection"""
+        """Close WebSocket connection gracefully with proper handshake."""
         if self.ws_connection and self.connected:
             try:
-                # Send close frame
-                close_event = CloseConnection(code=1000)  # Normal closure
+                close_event = CloseConnection(code=1000)
                 close_data = self.ws_connection.send(close_event)
                 if close_data and self.socket:
                     self.socket.send(close_data)
 
-                # Wait for close response
                 start_time = time.time()
-                while (
-                    self.connected and (time.time() - start_time) < 5.0
-                ):  # 5 second timeout
+                while self.connected and (time.time() - start_time) < 5.0:
                     ready = select.select([self.socket], [], [], 0.1)
                     if ready[0]:
                         data = self.socket.recv(1024)
@@ -198,7 +212,6 @@ class WSProtoWrapper:
                                 if isinstance(event, CloseConnection):
                                     self.connected = False
                                     break
-                                # Handle any final events
                                 elif isinstance(event, Ping):
                                     self.socket.send(
                                         self.ws_connection.send(Pong(event.payload))
@@ -208,8 +221,8 @@ class WSProtoWrapper:
                         else:
                             break
 
-            except (ConnectionResetError, BrokenPipeError, OSError) as e:
-                logger.debug(f"WebSocket close interrupted by server termination: {e}")
+            except (ConnectionResetError, BrokenPipeError, OSError):
+                pass
             except Exception as e:
                 logger.warning(f"Error during close handshake: {e}")
             finally:

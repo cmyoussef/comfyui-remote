@@ -1,8 +1,8 @@
 """Validation functions for Nuke Remote Control CLI/GUI."""
 
-import sys
 import argparse
 import logging
+import sys
 
 from .utils.string_utils import convert_string_to_dict
 

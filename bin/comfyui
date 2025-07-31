@@ -14,17 +14,13 @@ log_header() {
 log_info() {
   printf "› %s\n" "$1"
 }
-log_warn() {
-  printf "› WARN: %s\n" "$1"
-}
 log_error() {
   printf "› ERROR: %s\n" >&2 "$1"
   exit 1
 }
 
 # Default Configuration
-# DN_COMFYUI_VERSION="1.0.8"
-DN_COMFYUI_VERSION="dev"
+DN_COMFYUI_VERSION="1.0.8"
 COMFY_VERSION="$DN_COMFYUI_VERSION"
 COMFY_BASE_PATH="/tools/SITE/rnd/comfyUI"
 
