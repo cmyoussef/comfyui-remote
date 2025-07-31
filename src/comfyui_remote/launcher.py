@@ -5,16 +5,12 @@ from __future__ import absolute_import
 import argparse
 import os
 import sys
-import logging
 
-from .dispatch import dispatch
 from comfyui_remote.job_runner import ExecuteWorkflow
+from .dispatch import dispatch
 from .logging_config import setup_logging
-# from cards.core.utils import Utils
 
 logger = setup_logging(debug=os.environ.get("DEBUG", False))
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
 
 
 def parse_args():
@@ -85,9 +81,6 @@ def parse_args():
         help="run the baking and rendering locally",
     )
 
-    # Debug and logging options
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-
     return parser.parse_args()
 
 
@@ -139,21 +132,15 @@ def main():
 
         # If GUI is requested or no workflow is provided, launch GUI
         if hasattr(args, "gui") and args.gui or not args.workflow:
-            if not args.workflow:
-                logger.info("No workflow specified, launching GUI...")
-            else:
-                logger.info("GUI mode requested, launching GUI...")
             launch_gui()
             return
 
+        logger.info("Executing workflow in CLI mode...")
         if not os.path.exists(args.workflow):
             logger.error(f"Workflow file not found: {args.workflow}")
             return sys.exit(-1)
 
-        logger.info("Executing workflow in CLI mode...")
-
-        on_farm = args.on_farm
-        dispatch(workflow=args.workflow, on_farm=on_farm)
+        dispatch(workflow=args.workflow, on_farm=args.on_farm)
 
     except KeyboardInterrupt:
         return sys.exit(1)

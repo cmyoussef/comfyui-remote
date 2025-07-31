@@ -5,27 +5,18 @@ import logging
 from pyparsing import (
     Literal,
     Optional,
+    ParseException,
     QuotedString,
     Word,
-    alphas,
     alphanums,
+)
+from pyparsing import (
+    alphas,
     ZeroOrMore,
     Group,
     Dict,
-    dictOf,
-    ParseException,
     White,
     pyparsing_common as ppc,
-)
-
-from pyparsing import (
-    Literal,
-    Optional,
-    ParseException,
-    QuotedString,
-    Word,
-    alphanums,
-    dictOf,
 )
 
 logger = logging.getLogger(__name__)
