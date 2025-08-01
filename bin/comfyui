@@ -20,7 +20,7 @@ log_error() {
 }
 
 # Default Configuration
-DN_COMFYUI_VERSION="1.0.8"
+DN_COMFYUI_VERSION="1.0.11"
 COMFY_VERSION="$DN_COMFYUI_VERSION"
 COMFY_BASE_PATH="/tools/SITE/rnd/comfyUI"
 
