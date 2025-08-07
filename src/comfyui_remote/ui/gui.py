@@ -101,7 +101,7 @@ class comfyRemote_UI(QtWidgets.QMainWindow):
         uic.loadUi(config.ui_path, self)
 
         self.selectShow.addItems(shows)
-
+        # self.clear_data()
         self.statusBar = QtWidgets.QStatusBar()
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("Ready")
