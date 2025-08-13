@@ -6,9 +6,13 @@ import logging
 import os
 import re
 
-# DNEG Imports
-import cards
-import spider
+try:
+    # DNEG Imports
+    import cards
+    import spider
+except ImportError:
+    cards = None
+    spider = None
 
 from comfyui_remote.config import DEFAULT_SHOW, DEFAULT_SHOT, SERVICE_KEYS
 

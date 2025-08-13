@@ -4,9 +4,11 @@ import logging
 import os
 import sys
 
-from dnlogging.formatters import DnFormatter, DEFAULT_LOG_FORMAT
-from dnlogging.handlers import ColoredStreamHandler
-
+try:
+    from dnlogging.formatters import DnFormatter, DEFAULT_LOG_FORMAT
+    from dnlogging.handlers import ColoredStreamHandler
+except ImportError:
+    pass
 
 def setup_logging(level=logging.INFO, debug=False, stdout=True, logfile=False):
     """Sets up Comfy Remote Logger.

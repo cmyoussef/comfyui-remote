@@ -24,10 +24,8 @@ DEFAULT_SHOT = "pdev_comp"
 
 # Command line to start the API server, e.g. "python3 ComfyUI/gui.py"; warning: do not add parameter --port as it will be passed later
 COMFY_REMOTE_BOB_TARGET = "platform-pipe5-1"
-API_COMMAND_LINE = "comfyui"
-
-# URL of the API server (warning: do not add the port number to the URL as it will be passed later)
-API_URL = "127.0.0.1"
+API_COMMAND_LINE = os.getenv("COMFY_CMD", "comfyui")
+API_URL = os.getenv("COMFY_API_URL", "127.0.0.1")
 
 # Set this to the maximum number of connection attempts to ComfyUI you want
 MAX_COMFY_START_ATTEMPTS = 40

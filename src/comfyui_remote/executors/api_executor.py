@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-import signal
+import platform
 import socket
 import subprocess
 import sys
@@ -138,24 +138,53 @@ class ComfyConnector:
 
                         full_command = ["bash", "-x", script_path] + script_args
                         logger.info(f"Executing with explicit bash: {full_command}")
+                        kwargs = dict(
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            bufsize=1,
+                        )
 
-                        self._process = subprocess.Popen(
-                            full_command,
-                            preexec_fn=os.setsid,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            text=True,
-                            bufsize=1,
-                        )
+                        if platform.system() == "Windows":
+                            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+                        else:
+                            kwargs["preexec_fn"] = os.setsid
+
+                        self._process = subprocess.Popen(full_command, **kwargs)
+
+
+
                     else:
-                        self._process = subprocess.Popen(
-                            api_command_line.split(),
-                            preexec_fn=os.setsid,
+
+                        kwargs = dict(
+
                             stdout=subprocess.PIPE,
+
                             stderr=subprocess.PIPE,
+
                             text=True,
+
                             bufsize=1,
+
                         )
+
+                        if platform.system() == "Windows":
+
+                            # Run the .bat via cmd; start in a new process group so we can signal it
+
+                            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+
+                            kwargs["shell"] = True  # needed to execute comfyui.bat
+
+                            cmd = api_command_line  # string for shell=True
+
+                        else:
+
+                            kwargs["preexec_fn"] = os.setsid  # POSIX process group
+
+                            cmd = api_command_line.split()  # list for shell=False
+
+                        self._process = subprocess.Popen(cmd, **kwargs)
 
                     logger.info("API process started with PID: %s", self._process.pid)
 
@@ -301,43 +330,88 @@ class ComfyConnector:
         return False
 
     def kill_api(self):
+        """Cross-platform shutdown of the ComfyUI process + WS, with cleanup."""
+        import platform, signal, time, os
+
         try:
-            # Close WebSocket connection first
-            if self.ws and self.ws.connected:
-                self.ws.close()
-                logger.info("kill_api: WebSocket connection closed.")
-                # Give a short delay for the close handshake to complete
-                time.sleep(0.1)
+            # 1) Close WebSocket first (gives the server a chance to finish nicely)
+            if getattr(self, "ws", None) and getattr(self.ws, "connected", False):
+                try:
+                    self.ws.close()
+                    logger.info("kill_api: WebSocket connection closed.")
+                except Exception as e:
+                    logger.warning(f"kill_api: WS close warning: {e}")
+                time.sleep(0.1)  # brief handshake time
 
-            # Then kill the API process
+            # 2) Stop the spawned process
             if self._process is not None and self._process.poll() is None:
-                os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
-                logger.info("kill_api: API process group killed.")
-        except Exception as e:
-            logger.error(f"kill_api: Warning: The following issues occurred: {e}")
-        finally:
-            # Clean up output streaming threads
-            if hasattr(self, "_stdout_thread") and self._stdout_thread.is_alive():
                 try:
-                    self._stdout_thread.join(timeout=1.0)
-                except Exception:
-                    pass
-            if hasattr(self, "_stderr_thread") and self._stderr_thread.is_alive():
-                try:
-                    self._stderr_thread.join(timeout=1.0)
-                except Exception:
-                    pass
+                    if platform.system() == "Windows":
+                        # Send CTRL+BREAK to the process group, then terminate, then kill as last resort
+                        try:
+                            self._process.send_signal(signal.CTRL_BREAK_EVENT)
+                        except Exception:
+                            pass
+                        time.sleep(0.3)
+                        try:
+                            self._process.terminate()
+                        except Exception:
+                            pass
+                        try:
+                            self._process.wait(timeout=2.0)
+                        except Exception:
+                            try:
+                                self._process.kill()
+                            except Exception:
+                                pass
+                        logger.info("kill_api: Windows process group signaled/terminated.")
+                    else:
+                        # POSIX: terminate the whole group
+                        try:
+                            os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
+                        except Exception:
+                            # Fallback to terminate/kill if killpg fails
+                            try:
+                                self._process.terminate()
+                            except Exception:
+                                pass
+                        try:
+                            self._process.wait(timeout=2.0)
+                        except Exception:
+                            try:
+                                self._process.kill()
+                            except Exception:
+                                pass
+                        logger.info("kill_api: POSIX process group signaled/terminated.")
+                except Exception as e:
+                    logger.error(f"kill_api: Warning during process shutdown: {e}")
 
+        finally:
+            # 3) Join output threads so pipes close cleanly
+            try:
+                if hasattr(self, "_stdout_thread") and self._stdout_thread.is_alive():
+                    self._stdout_thread.join(timeout=1.0)
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "_stderr_thread") and self._stderr_thread.is_alive():
+                    self._stderr_thread.join(timeout=1.0)
+            except Exception:
+                pass
+
+            # 4) Null out references
             self._process = None
             self.ws = None
             self.urlport = None
             self.server_address = None
             self.client_id = None
-            # Clean up capture lists
+
             if hasattr(self, "_captured_stdout"):
                 self._captured_stdout = None
             if hasattr(self, "_captured_stderr"):
                 self._captured_stderr = None
+
+            # Reset singleton so a fresh ComfyConnector can start later
             ComfyConnector._instance = None
             logger.info("kill_api: Cleanup complete.")
 

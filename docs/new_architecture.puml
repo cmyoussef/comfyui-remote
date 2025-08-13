@@ -1,0 +1,302 @@
+@startuml
+title comfyui-remote - End-State Class Architecture (One Graph)
+
+/' ===== Interfaces ===== '/
+interface INode
+interface IExecutor
+interface IConnector
+interface IProgressObserver
+interface IGraphCompiler
+
+/' ===== Nodes & Graph ===== '/
+abstract class NodeBase implements INode {
+  - id : str
+  - metadata : NodeMetadata
+  + get_id() : str
+  + inputs() : dict
+  + outputs() : dict
+  + set_param(name : str, value)
+  + get_param(name : str)
+}
+
+class NodeMetadata {
+  + type : str
+  + label : str
+  + category : str
+}
+
+class Parameter {
+  + name : str
+  + type : str
+  + default_value
+  + validate(value) : bool
+}
+
+class Connection {
+  + out_node_id : str
+  + out_port : str
+  + in_node_id : str
+  + in_port : str
+}
+
+class Graph {
+  - nodes : dict
+  - connections : list
+  + add_node(node : INode)
+  + connect(a_id : str, a_port : str, b_id : str, b_port : str)
+  + get_node(id : str) : INode
+  + iter_nodes() : list
+  + iter_connections() : list
+}
+
+class NodeRegistry {
+  - types : dict
+  + register(name : str, cls)
+  + get(name : str)
+  + all() : list
+}
+
+class NodeFactory {
+  - registry : NodeRegistry
+  + create(name : str, kwargs : dict) : INode
+}
+
+class NodeCoreAPI {
+  - registry : NodeRegistry
+  - factory : NodeFactory
+  - graph : Graph
+  + create_node(type_name : str, kwargs : dict) : INode
+  + connect(from_id : str, from_port : str, to_id : str, to_port : str)
+  + set_params(node_id : str, params : dict)
+  + list_parameters(node_id : str) : dict
+  + graph_ref() : Graph
+}
+
+/' ===== Workflows ===== '/
+class WorkflowTemplate {
+  + id : str
+  + name : str
+  + meta : dict
+  + defaults : dict
+}
+
+class TemplateRepository {
+  + list() : list
+  + get(id : str) : WorkflowTemplate
+}
+
+class WorkflowLoader {
+  + load_from_json(path : str)
+  + load_from_template(tpl : WorkflowTemplate)
+}
+
+class ComfyCompiler implements IGraphCompiler {
+  + compile(graph : Graph, ctx : ExecutionContext) : dict
+}
+
+class WorkflowManager {
+  - node_api : NodeCoreAPI
+  - validator : ValidationService
+  - config : ConfigManager
+  - progress : ProgressService
+  - output : OutputHandler
+  - compiler : IGraphCompiler
+  - executor : IExecutor
+  + load_workflow(src)
+  + apply_params(overrides : dict)
+  + validate()
+  + execute(ctx : ExecutionContext) : dict
+  + on_progress(cb)
+  + cancel(handle_id : str)
+  + results(handle_id : str) : dict
+}
+
+/' ===== Execution ===== '/
+class ExecutionContext {
+  + mode : str
+  + work_dir : str
+  + base_url : str
+  + auth : dict
+  + env : dict
+  + extras : dict
+}
+
+abstract class ExecutorBase implements IExecutor {
+  - connector : IConnector
+  + prepare(graph : Graph, ctx : ExecutionContext)
+  + submit(graph : Graph, ctx : ExecutionContext) : str
+  + poll(handle_id : str) : dict
+  + cancel(handle_id : str)
+  + collect(handle_id : str) : dict
+  + execute(graph : Graph, ctx : ExecutionContext) : dict
+}
+
+class LocalExecutor extends ExecutorBase
+class RemoteExecutor extends ExecutorBase
+class ExecutorFactory {
+  + create(mode : str, ctx : ExecutionContext) : IExecutor
+}
+
+/' ===== Connectors (Comfy) ===== '/
+class ComfyServerManager {
+  + start(opts : dict) : ServerHandle
+  + stop(handle : ServerHandle)
+  + is_running(handle : ServerHandle) : bool
+  + port(handle : ServerHandle) : int
+  + healthcheck(handle : ServerHandle) : bool
+}
+
+class ServerHandle {
+  + pid : int
+  + port : int
+  + log_path : str
+}
+
+class ComfyRestClient {
+  - base_url : str
+  + post(endpoint : str, json : dict) : dict
+  + get(endpoint : str) : dict
+}
+
+class ComfyWsClient {
+  + open(url : str)
+  + subscribe(job_id : str, observer : IProgressObserver)
+  + close()
+}
+
+class ComfyConnector implements IConnector {
+  - rest : ComfyRestClient
+  - ws : ComfyWsClient
+  + open()
+  + post_workflow(payload : dict) : str
+  + subscribe(job_id : str, observer : IProgressObserver)
+  + status(job_id : str) : dict
+  + fetch_outputs(job_id : str) : dict
+  + cancel(job_id : str)
+  + close()
+}
+
+/' ===== Services ===== '/
+class ValidationService {
+  + validate_graph(graph : Graph)
+  + validate_node(node : INode)
+  + validate_params(node : INode, params : dict)
+}
+
+class ProgressService {
+  - observers : set
+  + subscribe(obs : IProgressObserver)
+  + unsubscribe(obs : IProgressObserver)
+  + publish(event : dict)
+}
+
+class OutputHandler {
+  + plan_outputs(graph : Graph) : dict
+  + store(handle_id : str, artifacts : dict) : dict
+  + paths(handle_id : str) : dict
+}
+
+class ConfigManager {
+  + get(path : str, default_value)
+  + profile() : str
+}
+
+class LoggingService {
+  + get_logger(name : str)
+}
+
+class WMProgressObserver implements IProgressObserver {
+  + update(event : dict)
+}
+
+/' ===== API ===== '/
+class WorkflowAPI {
+  + list_templates()
+  + load(src)
+  + parameters()
+  + set_params(d : dict)
+}
+class ExecutionAPI {
+  + run(ctx : ExecutionContext) : str
+  + progress(handle_id : str) : list
+  + cancel(handle_id : str)
+  + results(handle_id : str) : dict
+}
+class QueryAPI {
+  + describe_graph() : dict
+  + list_nodes() : list
+  + get_node(id : str) : dict
+}
+
+/' ===== CLI ===== '/
+class RunCommand {
+  + run(args)
+}
+class ValidateCommand {
+  + run(args)
+}
+class TemplatesCommand {
+  + run(args)
+}
+class GuiCommand {
+  + run(args)
+}
+
+/' ===== UI (Qt, MVVM) ===== '/
+class MainWindow
+class TemplateBrowser
+class ParameterPanel
+class ProgressPane
+class WorkflowViewModel
+class ParametersModel
+class RunsModel
+class RunController
+class ThemeManager
+
+/' ===== Relationships ===== '/
+NodeFactory --> NodeRegistry
+NodeCoreAPI *-- Graph
+NodeCoreAPI --> NodeFactory
+NodeBase --> Parameter
+Graph o-- INode
+Graph o-- Connection
+
+WorkflowManager --> NodeCoreAPI
+WorkflowManager --> ValidationService
+WorkflowManager --> ConfigManager
+WorkflowManager --> OutputHandler
+WorkflowManager --> ProgressService
+WorkflowManager --> IGraphCompiler
+WorkflowManager --> IExecutor
+
+ExecutorBase --> IConnector
+LocalExecutor --> ComfyServerManager
+LocalExecutor --> ComfyConnector
+RemoteExecutor --> ComfyConnector
+ExecutorFactory --> LocalExecutor
+ExecutorFactory --> RemoteExecutor
+
+ComfyConnector --> ComfyRestClient
+ComfyConnector --> ComfyWsClient
+
+ProgressService o-- IProgressObserver
+WMProgressObserver ..|> IProgressObserver
+WorkflowManager --> WMProgressObserver
+
+WorkflowAPI --> WorkflowManager
+ExecutionAPI --> WorkflowManager
+QueryAPI --> WorkflowManager
+
+RunCommand --> WorkflowManager
+ValidateCommand --> WorkflowLoader
+TemplatesCommand --> TemplateRepository
+GuiCommand --> MainWindow
+
+MainWindow --> WorkflowViewModel
+MainWindow --> RunController
+TemplateBrowser --> WorkflowViewModel
+ParameterPanel --> ParametersModel
+ProgressPane --> RunsModel
+RunController --> WorkflowManager
+ThemeManager --> MainWindow
+@enduml

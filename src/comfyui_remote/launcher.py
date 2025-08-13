@@ -89,13 +89,17 @@ def launch_gui():
     try:
         from .ui import gui
         from PyQt5 import QtWidgets
-        import pipetheme.palettes
+        try:
+            import pipetheme.palettes
+            pipetheme.palettes.setPalette("ivy")
+        except ImportError:
+            pass
         import signal
 
         # Allow ctrl-c to exit
         signal.signal(signal.SIGINT, signal.SIG_DFL)
 
-        pipetheme.palettes.setPalette("ivy")
+
         app = QtWidgets.QApplication(sys.argv)
         mainWindow = gui.comfyRemote_UI()
         mainWindow.show()

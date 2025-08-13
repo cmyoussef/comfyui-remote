@@ -32,14 +32,19 @@ package_path = os.path.dirname(
 if package_path not in sys.path:
     sys.path.insert(0, package_path)
 
-from comfyui_remote.utils import json_utils, pipe_query
+from comfyui_remote.utils import json_utils
+try:
+    from comfyui_remote.utils import pipe_query
+except:
+    pass
 from comfyui_remote.job_runner import ExecuteWorkflow
 from comfyui_remote.ui.configs import config
 
 logger = logging.getLogger(__name__)
 
 shows = ["LIBRARY"]
-if os.environ["SHOW"] not in shows:
+show = os.environ.get('SHOW')
+if show and show not in shows:
     shows.append(os.environ["SHOW"])
 
 
