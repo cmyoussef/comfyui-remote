@@ -1,0 +1,452 @@
+@startuml comfyui-remote-architecture
+title comfyui-remote — Full Architecture Class Diagram
+
+skinparam packageStyle rectangle
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam monochrome false
+
+' ===================== CORE PACKAGE =====================
+package "core.base" {
+  interface IExecutor {
+    +prepare(graph: Graph, ctx: ExecutionContext): void
+    +submit(graph: Graph, ctx: ExecutionContext): str
+    +poll(handle_id: str): dict
+    +cancel(handle_id: str): void
+    +collect(handle_id: str): dict
+    +execute(graph: Graph, ctx: ExecutionContext): dict
+  }
+
+  interface IConnector {
+    +open(): void
+    +post_workflow(payload: dict, client_id: str): str
+    +subscribe(prompt_id: str, observer: IProgressObserver): void
+    +status(prompt_id: str): dict
+    +fetch_outputs(prompt_id: str): dict
+    +cancel(prompt_id: str): void
+    +close(): void
+  }
+
+  class ExecutionContext {
+    +mode: str
+    +work_dir: str
+    +base_url: str
+    +auth: dict
+    +env: dict
+    +extras: dict
+  }
+}
+
+package "core.exceptions" {
+  class ComfyRemoteError
+  class ValidationError
+  class ConnectorError
+  class ServerNotReady
+  class SubmissionError
+
+  enum RunState {
+    queued
+    running
+    success
+    error
+    interrupted
+  }
+
+  ComfyRemoteError <|-- ValidationError
+  ComfyRemoteError <|-- ConnectorError
+  ComfyRemoteError <|-- ServerNotReady
+  ComfyRemoteError <|-- SubmissionError
+}
+
+' ===================== NODES PACKAGE =====================
+package "nodes.base" {
+  class NodeMetadata {
+    +type: str
+    +label: str
+    +category: str
+  }
+
+  class NodeBase {
+    -_id: str
+    -_meta: NodeMetadata
+    -_params: dict
+    +get_id(): str
+    +meta(): NodeMetadata
+    +params(): dict
+    +set_param(name: str, value)
+    +get_param(name: str)
+    +inputs(): dict
+    +outputs(): dict
+  }
+}
+
+package "nodes.core" {
+  class Connection {
+    +out_node_id: str
+    +out_port: str
+    +in_node_id: str
+    +in_port: str
+  }
+
+  class Graph {
+    -_nodes: dict
+    -_edges: list
+    +add_node(node: NodeBase)
+    +get_node(id: str): NodeBase
+    +iter_nodes(): list
+    +connect(a_id: str, a_port: str, b_id: str, b_port: str)
+    +iter_connections(): list
+    +as_tuple(): (dict, list)
+  }
+
+  class NodeRegistry {
+    -_types: dict
+    +register(name: str, cls)
+    +get(name: str)
+    +all(): list
+  }
+
+  class NodeFactory {
+    -_registry: NodeRegistry
+    +create(name: str, kwargs: dict): NodeBase
+  }
+
+  class NodeCoreAPI {
+    -_graph: Graph
+    -_registry: NodeRegistry
+    -_factory: NodeFactory
+    +create_node(type_name: str, kwargs: dict): NodeBase
+    +connect(from_id: str, from_port: str, to_id: str, to_port: str)
+    +set_params(node_id: str, params: dict)
+    +list_parameters(node_id: str): dict
+    +graph_ref(): Graph
+  }
+
+  Graph o-- NodeBase
+  Graph o-- Connection
+  NodeFactory --> NodeRegistry
+  NodeCoreAPI *-- Graph
+  NodeCoreAPI --> NodeFactory
+}
+
+' ===================== WORKFLOWS PACKAGE =====================
+package "workflows.templates" {
+  class WorkflowTemplate {
+    +id: str
+    +name: str
+    +meta: dict
+    +defaults: dict
+    +path: str
+  }
+
+  class TemplateRepository {
+    -_root: str
+    +list(): list<WorkflowTemplate>
+    +get(id: str): WorkflowTemplate
+  }
+}
+
+package "workflows.loader" {
+  class WorkflowLoader {
+    -_api: NodeCoreAPI
+    +load_from_json(path: str)
+    +load_from_template(tpl: WorkflowTemplate)
+  }
+}
+
+package "workflows.compiler" {
+  interface IGraphCompiler {
+    +compile(graph: Graph, ctx: ExecutionContext): dict
+  }
+
+  class ComfyCompiler implements IGraphCompiler {
+    +compile(graph: Graph, ctx: ExecutionContext): dict
+  }
+}
+
+' ===================== SERVICES PACKAGE =====================
+package "services" {
+  interface IProgressObserver {
+    +update(event: dict): void
+  }
+
+  class ProgressService {
+    -_observers: set
+    +subscribe(cb)
+    +unsubscribe(cb)
+    +publish(event: dict)
+  }
+
+  class ProgressEventAdapter implements IProgressObserver {
+    +update(event: dict)
+  }
+
+  class ValidationService {
+    +validate_graph(graph: Graph): list<str>
+    +validate_node(node): list<str>
+    +validate_params(node, params): list<str>
+  }
+
+  class OutputHandler {
+    -_root: str
+    +plan_outputs(graph): dict
+    +store(handle_id: str, artifacts: dict): dict
+    +paths(handle_id: str): dict
+  }
+
+  class ConfigManager {
+    -_profile: str
+    +get(key: str, default)
+    +profile(): str
+  }
+
+  class LoggingService {
+    +get_logger(name: str)
+  }
+}
+
+' ===================== CONNECTORS PACKAGE =====================
+package "connectors.session" {
+  class SessionFactory {
+    -_auth: dict
+    -_timeout: float
+    +create(): requests.Session
+  }
+}
+
+package "connectors.comfy" {
+  class ServerHandle {
+    +pid: int
+    +port: int
+    +log_path: str
+  }
+
+  class ComfyServerManager {
+    -_proc
+    -_handle: ServerHandle
+    -_cmd: str
+    +start(opts: dict): ServerHandle
+    +stop(): void
+  }
+
+  class ComfyRestClient {
+    -_base: str
+    -_session: requests.Session
+    +get(endpoint: str): dict
+    +post(endpoint: str, json: dict): dict
+    +get_bytes(url: str): bytes
+  }
+
+  class ComfyWsClient {
+    -_ws_url: str
+    -_app
+    -_thread
+    -_subscribers: dict
+    +open(): void
+    +subscribe(key: str, cb): void
+    +close(): void
+  }
+
+  class ComfyConnector implements IConnector {
+    -_base: str
+    -_rest: ComfyRestClient
+    -_client_id: str
+    -_ws: ComfyWsClient
+    -_obs: IProgressObserver
+    -_last_status: dict
+    +open(): void
+    +post_workflow(payload: dict, client_id: str): str
+    +subscribe(prompt_id: str, observer: IProgressObserver): void
+    +status(prompt_id: str): dict
+    +fetch_outputs(prompt_id: str): dict
+    +cancel(prompt_id: str): void
+    +close(): void
+  }
+
+  ComfyServerManager o-- ServerHandle
+  ComfyConnector --> ComfyRestClient
+  ComfyConnector --> ComfyWsClient
+  SessionFactory ..> ComfyRestClient
+}
+
+' ===================== EXECUTORS PACKAGE =====================
+package "executors" {
+  class ExecutorFactory {
+    +create(mode: str, ctx: ExecutionContext): IExecutor
+  }
+
+  class LocalExecutor implements IExecutor {
+    -_server: ComfyServerManager
+    -_connector: ComfyConnector
+    -_handle_id: str
+    +prepare(graph: Graph, ctx: ExecutionContext): void
+    +submit(graph: Graph, ctx: ExecutionContext): str
+    +poll(handle_id: str): dict
+    +cancel(handle_id: str): void
+    +collect(handle_id: str): dict
+  }
+
+  class RemoteExecutor implements IExecutor {
+    -_connector: ComfyConnector
+    +prepare(graph: Graph, ctx: ExecutionContext): void
+    +submit(graph: Graph, ctx: ExecutionContext): str
+    +poll(handle_id: str): dict
+    +cancel(handle_id: str): void
+    +collect(handle_id: str): dict
+  }
+
+  LocalExecutor --> ComfyServerManager
+  LocalExecutor --> ComfyConnector
+  RemoteExecutor --> ComfyConnector
+  ExecutorFactory --> LocalExecutor
+  ExecutorFactory --> RemoteExecutor
+}
+
+' ===================== WORKFLOW MANAGER =====================
+package "workflows.manager" {
+  class WMProgressObserver implements IProgressObserver {
+    -_bus: ProgressService
+    +update(event: dict)
+  }
+
+  class WorkflowManager {
+    -_api: NodeCoreAPI
+    -_validator: ValidationService
+    -_config: ConfigManager
+    -_progress: ProgressService
+    -_output: OutputHandler
+    -_compiler: IGraphCompiler
+    -_on_progress
+    +load_workflow(loader_callable, *args, **kwargs)
+    +apply_params(overrides: dict)
+    +validate(): void
+    +on_progress(cb)
+    +execute(ctx: ExecutionContext): dict
+    +cancel(handle_id: str): void
+    +results(handle_id: str): dict
+  }
+
+  WorkflowManager --> NodeCoreAPI
+  WorkflowManager --> ValidationService
+  WorkflowManager --> ConfigManager
+  WorkflowManager --> ProgressService
+  WorkflowManager --> OutputHandler
+  WorkflowManager --> IGraphCompiler
+  WorkflowManager --> IExecutor
+  WMProgressObserver ..|> IProgressObserver
+  ProgressService o-- IProgressObserver
+}
+
+' ===================== API FACADES =====================
+package "api" {
+  class WorkflowAPI {
+    -_repo: TemplateRepository
+    -_loader: WorkflowLoader
+    -_node_api: NodeCoreAPI
+    +list_templates(): list
+    +load(src: str, is_template: bool)
+    +parameters(): dict
+    +set_params(d: dict): void
+  }
+
+  class ExecutionAPI {
+    -_wm: WorkflowManager
+    +run(ctx: ExecutionContext): dict
+    +progress(handle_id: str)
+    +cancel(handle_id: str)
+    +results(handle_id: str): dict
+  }
+
+  class QueryAPI {
+    -_api: NodeCoreAPI
+    +describe_graph(): dict
+    +list_nodes(): list
+    +get_node(id: str): dict
+  }
+
+  WorkflowAPI --> TemplateRepository
+  WorkflowAPI --> WorkflowLoader
+  WorkflowAPI --> NodeCoreAPI
+  ExecutionAPI --> WorkflowManager
+  QueryAPI --> NodeCoreAPI
+}
+
+' ===================== CLI COMMANDS =====================
+package "cli" {
+  class RunCommand {
+    +build_parser(sub)
+    +run(args)
+  }
+  class ValidateCommand {
+    +build_parser(sub)
+    +run(args)
+  }
+  class TemplatesCommand {
+    +build_parser(sub)
+    +list(args)
+    +show(args)
+  }
+  class GuiCommand {
+    +build_parser(sub)
+    +run(args)
+  }
+}
+
+' ===================== QT UI (MVVM) =====================
+package "ui.qt" {
+  class MainWindow {
+    -_controller: RunController
+    -_theme: ThemeManager
+  }
+
+  class RunController {
+    -_wf_vm: WorkflowViewModel
+    -_params_model: ParametersModel
+    -_runs_model: RunsModel
+    -_logger
+    +load_workflow_file(path: str)
+    +run_local()
+    +run_remote(url: str, token: str)
+  }
+
+  class WorkflowViewModel {
+    -_api: NodeCoreAPI
+    +set_api(api: NodeCoreAPI)
+    +api(): NodeCoreAPI
+  }
+
+  class ParametersModel {
+    -_params: dict
+    +rowCount(): int
+    +columnCount(): int
+    +data(index, role): any
+    +setData(index, value, role): bool
+  }
+
+  class RunsModel {
+    -_runs: list
+    +add_run(run_info: dict)
+    +update_status(handle_id: str, status: str)
+  }
+
+  class ThemeManager {
+    -_styles: dict
+    +apply_theme(widget, theme_name: str)
+  }
+
+  MainWindow --> RunController
+  RunController --> WorkflowViewModel
+  RunController --> ParametersModel
+  RunController --> RunsModel
+  ThemeManager --> MainWindow
+}
+
+' ===================== KEY RELATIONSHIPS =====================
+NodeCoreAPI *-- Graph
+Graph o-- NodeBase
+ComfyConnector ..|> IConnector
+LocalExecutor ..|> IExecutor
+RemoteExecutor ..|> IExecutor
+ProgressEventAdapter ..|> IProgressObserver
+
+@enduml

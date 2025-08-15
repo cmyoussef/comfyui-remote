@@ -1,12 +1,26 @@
-#!/usr/bin/env python
-"""Runs a Comfy Remote function of either bake and render.
+#!/usr/bin/env bash
+set -euo pipefail
+# comfy-remote — always exposes repo/src on PYTHONPATH and runs the pure launcher.
 
-Usage:
-    comfy-remote /jobs/show/my/workflow/workflow.json
-        --frames 1043-1047
-        --overrides 'prompt: "A subway car filled with lush grass and surrounded by plants."'
-"""
-import comfyui_remote.launcher
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SRC="$ROOT/src"
 
-if __name__ == "__main__":
-    exit(comfyui_remote.launcher.main())
+if [[ ! -f "$SRC/comfyui_remote/bin/comfy_server.py" ]]; then
+  echo "[ERROR] Could not find src/comfyui_remote/bin/comfy_server.py near $SCRIPT_DIR"
+  echo "        Expected: $SRC"
+  exit 2
+fi
+
+export PYTHONPATH="$SRC:${PYTHONPATH:-}"
+
+# Optional: pin interpreter with COMFY_REMOTE_PY
+if [[ -n "${COMFY_REMOTE_PY:-}" && -x "${COMFY_REMOTE_PY:-}" ]]; then
+  exec "$COMFY_REMOTE_PY" -m comfyui_remote.bin.comfy_server "$@"
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 -m comfyui_remote.bin.comfy_server "$@"
+fi
+
+exec python -m comfyui_remote.bin.comfy_server "$@"

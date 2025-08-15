@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# comfy-remote-dneg — DNEG wrapper: exposes repo/src and runs the DNEG launcher
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SRC="$ROOT/src"
+
+if [[ ! -f "$SRC/comfyui_remote/bin/comfy_server_dneg.py" ]]; then
+  echo "[ERROR] Could not find src/comfyui_remote/bin/comfy_server_dneg.py near $SCRIPT_DIR"
+  echo "        Expected: $SRC"
+  exit 2
+fi
+
+export PYTHONPATH="$SRC:${PYTHONPATH:-}"
+
+if [[ -n "${COMFY_REMOTE_PY:-}" && -x "${COMFY_REMOTE_PY:-}" ]]; then
+  exec "$COMFY_REMOTE_PY" -m comfyui_remote.bin.comfy_server_dneg "$@"
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 -m comfyui_remote.bin.comfy_server_dneg "$@"
+fi
+
+exec python -m comfyui_remote.bin.comfy_server_dneg "$@"

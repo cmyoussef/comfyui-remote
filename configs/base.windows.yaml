@@ -1,0 +1,59 @@
+# comfyui-remote/configs/base.windows.yaml
+# Windows baseline configuration for ComfyUI Remote
+
+server:
+  host: 127.0.0.1
+  # 0 = choose a free port automatically
+  port: 0
+  disable_cuda_malloc: false
+  # Keep server output quieter (Comfy still logs to its own file if you tee it)
+  dont_print_server: false
+  # Additional raw CLI args to pass to Comfy (rarely needed)
+  extra_args: []
+
+io:
+  # Leave blank to use Comfy defaults; your tests & demos can override at runtime.
+  input_dir: ""
+  output_dir: ""
+  temp_dir: ""
+  user_dir: ""
+
+paths:
+  # Folder that contains ComfyUI/main.py (Electron build path, or a source clone)
+  home: "${COMFYUI_HOME}"
+
+  # A single root folder under which you keep models.
+  # The manager will auto-map:  <models_root>/models/<category>
+  # for categories not explicitly overridden below.
+  #
+  # Example: if models_root = E:/comfyui/comfyui
+  #   checkpoints  -> E:/comfyui/comfyui/models/checkpoints
+  #   diffusion_models -> E:/comfyui/comfyui/models/diffusion_models
+  models_root: "E:/comfyui/comfyui"
+
+  # Per-category overrides (optional). Lists or single strings are both fine.
+  # Explicit entries override/fill before models_root auto-mapping.
+  models:
+    # checkpoints: ["E:/comfyui/comfyui/models/checkpoints"]
+    # vae:         ["E:/comfyui/comfyui/models/vae"]
+    # loras:       ["E:/comfyui/comfyui/models/loras"]
+    # diffusion_models:
+    #   - "E:/comfyui/comfyui/models/diffusion_models"
+    #   - "E:/comfyui/comfyui/models/unet"
+    # controlnet:  ["E:/comfyui/comfyui/models/controlnet"]
+    # embeddings:  ["E:/comfyui/comfyui/models/embeddings"]
+    # clip:        ["E:/comfyui/comfyui/models/clip"]
+    # clip_vision: []
+    # upscale_models: []
+    # configs: []
+
+  # Additional custom-nodes folders (optional).
+  # The manager writes these into the Comfy extra-model-paths YAML.
+  custom_nodes:
+    - "E:/comfyui/comfyui/custom_nodes"
+    - "${LOCALAPPDATA}/Programs/@comfyorgcomfyui-electron/resources/ComfyUI/custom_nodes"
+
+# Extra environment variables set for the server process
+env:
+  HF_HUB_DISABLE_TELEMETRY: "1"
+  DO_NOT_TRACK: "1"

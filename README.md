@@ -1,93 +1,284 @@
 # comfyui-remote
 
-_Description:_ A serverless/GUI implementation for batch executing ComfyUI workflows.
+A client toolkit to **load**, **parameterize**, and **execute** ComfyUI workflows locally or remotely.
 
-## Usage
+## Overview
 
-### ComfyUI Remote
+**comfyui-remote** provides a clean interface for automating ComfyUI workflows:
 
-ComfyUI Remote is a command-line tool for executing workflows in ComfyUI by specifying a JSON file that defines the workflow and its associated parameters.
+- Run **locally** (auto-start a ComfyUI server)
+- Run against a **remote** ComfyUI instance
+- Dispatch to a **render farm** via plugins (extensible architecture)
 
-#### Basic Command
+## Features
 
-To run the tool, use the following command in your terminal:
+- **Clean CLI** for automation and scripting
+- **Qt UI** (MVVM) for browsing and running workflows
+- **Stable API layer** for embedding in other applications
+- **Validation**, **logging**, and **progress events**
+- **Extensible architecture** for custom executors and nodes
 
-```bash
-dncomfyui -r --json_file <path_to_json> --batch_size <batch_size>
-```
-
-#### Parameters
-
-**Required Parameters:**
-- `--json_file`: Path to the JSON file containing the workflow
-- `--batch_size`: The number of times you want the workflow to be executed
-
-**Optional Parameters:**
-- `--frame_range`: The range of frames for input images (format: start-end). Example: `--frame_range 0-10`
-- `--int_args`: Dictionary containing any dnNode in ComfyUI that requires an integer input
-- `--float_args`: Dictionary containing any dnNode in ComfyUI that requires a float input
-- `--str_args`: Dictionary containing any dnNode in ComfyUI that requires a string input
-
-#### Format for Arguments
-
-To pass arguments for dnNodes that require integers, floats, or strings, enter them as a dictionary with the name of the dnNode and its value.
-
-#### Example Usage
+## Installation
 
 ```bash
-dncomfyui -r --json_file script_files/img_to_img/img2img_v018.json --batch_size 1 \
---frame_range 0-1 \
---int_args '{"Steps": 50, "Seed": 432432}' \
---str_args '{"PositivePrompt": "a cow wearing a hat", "NegativePrompt": "realistic", "inputPath": "/u/gdso/Pictures/syndata_test/imgs"}' \
---float_args '{"cnStrength": 0.8}'
+pip install comfyui-remote
 ```
 
-**Explanation:**
-- `--json_file`: The workflow file in JSON format
-- `--batch_size`: Executes the workflow once
-- `--frame_range`: Specifies the frame range from 0 to 1
-- `--int_args`: Passes integer arguments to the dnNode, such as setting Steps to 50 and Seed to 432432
-- `--str_args`: Specifies string arguments like prompts
-- `--float_args`: Provides float values like cnStrength set to 0.8
+## Quick Start
 
-## Documentation
-
-The full docs of every published version are available [here](http://i/tools/SITE/doc/comfyui-remote/comfyui-remote).
-
-The User Documentation is [available on dnet](http://dnet.dneg.com/display/PRODTECH/comfyui-remote) and is updated upon any release.
-
-## Contributing
-
-Our [guidelines](http://dnet.dneg.com/display/PRODTECH/Submitting+and+Reviewing+Code) outline every step to submit your code for review.
-
-As a team we use PEP-0008 as a style guide.
-You can run an automated style check on the project by calling:
+### CLI Usage
 
 ```bash
-python setup.py flake8
+# Local execution (auto-starts server if needed)
+comfy run --workflow path/to/workflow.json --mode local
+
+# Remote execution with authentication
+comfy run --workflow path/to/workflow.json --mode remote --url http://host:8188 --token $TOKEN
+
+# Parameter overrides
+comfy run -w workflow.json -p Steps=50 Seed=12345 PositivePrompt="a castle"
+
+# Validate workflow
+comfy validate -w workflow.json
+
+# List available templates
+comfy templates list
+
+# Show template details
+comfy templates show txt2img
+
+# Launch GUI
+comfy gui
 ```
 
-from the project root.
+### Python API
 
-## Deploying
+```python
+from comfyui_remote.api import WorkflowAPI, ExecutionAPI
+from comfyui_remote.core import ExecutionContext
 
-This project uses python [setuptools](https://setuptools.readthedocs.io/en/latest/) to build the python package in an effort to make it available to different distribution systems, including bob.
-The source can be built and distributed via [dnpkg](http://intranet/tools/SITE/rnd/doc/dnpkg/workflow.html#using-dnpkg). The [usage section](http://intranet/tools/SITE/rnd/doc/dnpkg/workflow.html#using-dnpkg) and the explanation of what a [dnpkg target](http://intranet/tools/SITE/rnd/doc/dnpkg/gettingstarted.html#targets) is are particularly relevant.
+# Load workflow
+workflow_api = WorkflowAPI()
+workflow_api.load("workflow.json")
 
-### Supporting updates to multiple shows in production
+# Set parameters
+workflow_api.set_params({
+    "Steps": 50,
+    "Seed": 12345,
+    "PositivePrompt": "a castle"
+})
 
-The recommended way to do long term support for certain shows or releases is to create a specific release branch for a major-minor version, adding a show or feature tag if necessary. For example, a repo could have the following release branches
+# Execute
+execution_api = ExecutionAPI()
+ctx = ExecutionContext(mode="local")
+result = execution_api.run(ctx)
+```
 
-* master (3.1.5 released, always the latest and greatest)
-* release/1.1 (long term support branch from 1.1.3 which contains critical patches to an old version: 1.1.4, 1.1.5)
-* release/2-MAE (branched from the 2.5 release, will include new MAE specific minor and patch updates)
+## Architecture
+![Full Architecture Diagram](docs/comfyui_remote_architecture-comfyui_remote__Full_Architecture_Class_Diagram.svg)
 
-## Testing
+### Core Components
 
-Tests can be performed under multiple application environments using the [hum framework](http://i/tools/SITE/doc/hum/hum/index.html).
+#### 1. **Core Layer** (contracts & types)
+- `IExecutor`: Interface for workflow execution
+- `IConnector`: Interface for ComfyUI communication
+- `ExecutionContext`: Execution configuration
 
-Launch `hum test` in the shell to run the entire test suite.
+#### 2. **Nodes & Graph**
+- `NodeBase`, `NodeMetadata`: Node abstraction with typed metadata
+- `Graph`: Nodes + connections representation
+- `NodeRegistry`/`NodeFactory`: Registry and factory for node types
 
-## Contacts
+#### 3. **Workflows**
+- `TemplateRepository`: Manage workflow templates
+- `WorkflowLoader`: Import JSON/templates into graph
+- `ComfyCompiler`: Convert Graph → ComfyUI prompt JSON
 
-td@redefine.co
+#### 4. **Execution**
+- `ExecutorFactory`: Select appropriate executor (local/remote)
+- `LocalExecutor`: Manages local ComfyUI server
+- `RemoteExecutor`: Connects to existing ComfyUI instance
+
+#### 5. **Connectors**
+- `ComfyServerManager`: Start/stop local ComfyUI
+- `ComfyRestClient`: HTTP communication
+- `ComfyWsClient`: WebSocket for progress streaming
+- `ComfyConnector`: Coordinates REST+WS communication
+
+#### 6. **Services**
+- `ValidationService`: Graph validation
+- `ProgressService`: Progress event distribution
+- `OutputHandler`: Artifact management
+- `ConfigManager`: Configuration handling
+- `LoggingService`: Centralized logging
+
+### Project Structure
+
+```
+src/comfyui_remote/
+├── core/               # Interfaces, exceptions, types
+├── nodes/              # NodeBase, Graph, NodeCoreAPI
+├── workflows/          # Templates, loader, compiler
+├── executors/          # Local, remote, factory
+├── connectors/         # ComfyUI server integration
+├── services/           # Config, logging, progress, validation
+├── handlers/           # Output handling
+├── api/                # High-level facades
+├── cli/                # Command-line interface
+├── ui/qt/              # Qt GUI (MVVM)
+└── utils/              # Helper utilities
+```
+
+## Execution Flow
+
+### Local Workflow Execution
+
+1. Load workflow (JSON/template) → build `Graph`
+2. Compile graph → ComfyUI prompt payload
+3. Start local ComfyUI server (if needed)
+4. Submit workflow with unique `client_id`
+5. Stream progress via WebSocket
+6. Collect outputs via REST API
+7. Store artifacts and cleanup
+
+### Remote Workflow Execution
+
+Same as local, but uses existing ComfyUI instance at specified URL.
+
+## Configuration
+
+### Environment variables
+
+- `COMFYUI_HOME` — **required** for steps that start a real server.  
+  Points to the folder that contains `main.py`.
+
+  Examples:
+  - Windows (Electron):  
+    `C:\Users\<you>\AppData\Local\Programs\@comfyorgcomfyui-electron\resources\ComfyUI`
+
+Optional:
+- `COMFY_PORT` — fixed port; otherwise a free ephemeral port is chosen.
+- `COMFY_LISTEN` — host address; default `127.0.0.1`.
+
+
+### Execution Context
+
+Configure execution via `ExecutionContext`:
+- `mode`: "local" or "remote"
+- `base_url`: ComfyUI server URL (for remote mode)
+- `auth.token`: Authentication token
+
+## Extensibility
+
+### Custom Nodes
+
+Register custom node types:
+
+```python
+from comfyui_remote.nodes import NodeRegistry, NodeBase
+
+class CustomNode(NodeBase):
+    # Implementation
+    pass
+
+registry = NodeRegistry()
+registry.register("CustomNode", CustomNode)
+```
+
+### Custom Executors
+
+Implement `IExecutor` for custom execution strategies:
+
+```python
+from comfyui_remote.core import IExecutor
+
+class FarmExecutor(IExecutor):
+    def prepare(self, graph, ctx):
+        # Setup farm job
+        pass
+    
+    def submit(self, graph, ctx):
+        # Submit to farm
+        return job_id
+    
+    # ... other methods
+```
+
+### Custom Compilers
+
+Replace the default compiler:
+
+```python
+from comfyui_remote.workflows import IGraphCompiler
+
+class CustomCompiler(IGraphCompiler):
+    def compile(self, graph, ctx):
+        # Custom compilation logic
+        return prompt_json
+```
+
+## Error Handling
+
+The module provides specific exception types:
+
+- `ValidationError`: Invalid graph or parameters
+- `ServerNotReady`: Local server startup failure
+- `SubmissionError`: Workflow submission failure
+- `ConnectorError`: Communication errors
+
+## UI Architecture (MVVM)
+
+The Qt UI follows Model-View-ViewModel pattern:
+
+- **Views**: `MainWindow` and UI components
+- **ViewModels**: `WorkflowViewModel`, `ParametersModel`, `RunsModel`
+- **Controllers**: `RunController` connects UI and business logic
+- **Theme**: Centralized theme management via QSS
+
+## Design Principles
+
+1. **Separation of Concerns**: Clear boundaries between orchestration, server control, and communication
+2. **No Side Effects**: Explicit initialization, no hidden state changes
+3. **Interface-First**: Clean abstractions enable substitution
+4. **Observable Progress**: Central event system for UI/CLI updates
+5. **Minimal Dependencies**: Only essential packages required
+
+## Development
+
+### Testing
+
+```bash
+pytest tests/
+```
+
+### Building
+
+```bash
+python -m build
+```
+
+### Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
+
+## Future Enhancements
+
+- Schema-driven parameter forms via `/object_info`
+- Robust WebSocket reconnection with backoff
+- Pluggable authentication (API keys, OAuth, proxies)
+- Farm executor plugins via namespace packages
+- Rich progress UI with per-node status and ETA
+
+## License
+
+
+
+## Support
+
+For issues and questions:
+- GitHub Issues: https://github.com/cmyoussef/comfyui-remote.git
+- Documentation: [docs-url is coming]
