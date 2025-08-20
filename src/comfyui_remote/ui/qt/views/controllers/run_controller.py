@@ -1,14 +1,14 @@
 """Run controller."""
-from ...services.logging_service import LoggingService
-from ...services.config_manager import ConfigManager
-from ...services.progress_service import ProgressService
-from ...services.validation_service import ValidationService
+from ...core.base.workflow import ExecutionContext
 from ...handlers.output.output_handler import OutputHandler
 from ...nodes.core.node_core_api import NodeCoreAPI
 from ...nodes.core.node_registry import NodeRegistry
+from ...services.config_manager import ConfigManager
+from ...services.logging_service import LoggingService
+from ...services.progress_service import ProgressService
+from ...services.validation_service import ValidationService
 from ...workflows.loader.workflow_loader import WorkflowLoader
 from ...workflows.manager.workflow_manager import WorkflowManager
-from ...core.base.workflow import ExecutionContext
 
 
 class RunController:
@@ -32,11 +32,8 @@ class RunController:
         if api is None:
             self._logger.error("No workflow loaded")
             return
-        cfg = ConfigManager()
-        progress = ProgressService()
-        validator = ValidationService()
-        output = OutputHandler()
-        wm = WorkflowManager(api, validator, cfg, progress, output)
+
+        wm = WorkflowManager(node_api=api)
         ctx = ExecutionContext(mode="local")
         res = wm.execute(ctx)
         self._logger.info("Run finished: %s", res.get("status"))

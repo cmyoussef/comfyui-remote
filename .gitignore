@@ -30,3 +30,4 @@ doc/sphinx/build
 doc/sphinx/source/.doctrees/
 doc/sphinx/source/reference/api
 /tests/e2e/.comfy_outputs
+/tests/.comfy_outputs

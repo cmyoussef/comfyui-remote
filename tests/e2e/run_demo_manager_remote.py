@@ -5,8 +5,8 @@ import argparse
 import json
 import os
 import sys
-import time
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -22,18 +22,15 @@ from comfyui_remote.workflows.loader.workflow_loader import WorkflowLoader
 from comfyui_remote.nodes.core.node_registry import NodeRegistry
 from comfyui_remote.nodes.core.node_core_api import NodeCoreAPI
 from comfyui_remote.workflows.manager.workflow_manager import WorkflowManager
-from comfyui_remote.services.validation_service import ValidationService
-from comfyui_remote.services.progress_service import ProgressService
-from comfyui_remote.services.config_manager import ConfigManager
-from comfyui_remote.handlers.output.output_handler import OutputHandler
 from comfyui_remote.core.base.workflow import ExecutionContext
 from comfyui_remote.core.types import RunState
 
-
 WF_DEFAULT = REPO / "tests" / "resources" / "workflows" / "txt2img.json"
+
 
 def _log(step: str, msg: str) -> None:
     print(f"[DEMO][{step}] {msg}", flush=True)
+
 
 def _patch_clip_text_in_api(api: NodeCoreAPI, new_text: str) -> int:
     """
@@ -47,8 +44,10 @@ def _patch_clip_text_in_api(api: NodeCoreAPI, new_text: str) -> int:
             params = n.params()
             # typical param key is 'text' (from widgets_values[0]); adjust if your loader uses a different key
             if "text" in params:
-                n.set_param("text", new_text); hits += 1
+                n.set_param("text", new_text);
+                hits += 1
     return hits
+
 
 def _wait_until(manager: WorkflowManager, handle_id: str, timeout_s: float) -> dict:
     t0 = time.time()
@@ -60,12 +59,14 @@ def _wait_until(manager: WorkflowManager, handle_id: str, timeout_s: float) -> d
         time.sleep(0.25)
     return {"state": "timeout"}
 
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Manager-centric E2E: start server → connect manager(remote) → load → patch text → (save) → execute → download image"
     )
     ap.add_argument("-w", "--workflow", default=str(WF_DEFAULT), help="Editor JSON path")
-    ap.add_argument("-t", "--text", default="A photoreal glass bottle in a ocean, Pyramids of giza inside, cinematic lighting")
+    ap.add_argument("-t", "--text",
+                    default="A photoreal glass bottle in a ocean, Pyramids of giza inside, cinematic lighting")
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--save-patched", action="store_true", help="Write patched editor JSON to a temp file")
     args = ap.parse_args()
@@ -80,7 +81,7 @@ def main() -> int:
         return 2
 
     # 1) Start server (one-liner manager)
-    input_dir  = Path(tempfile.mkdtemp(prefix="mgr_in_"))
+    input_dir = Path(tempfile.mkdtemp(prefix="mgr_in_"))
     output_dir = Path(tempfile.mkdtemp(prefix="mgr_out_"))
     srv = ComfyServerManager()
     handle = srv.start({"input_dir": str(input_dir), "output_dir": str(output_dir)})
@@ -89,9 +90,8 @@ def main() -> int:
 
     try:
         # 2) Build manager bound to an API/graph
-        reg = NodeRegistry()
-        api = NodeCoreAPI(reg)
-        wm = WorkflowManager(api, ValidationService(), ConfigManager(), ProgressService(), OutputHandler())
+        api = NodeCoreAPI(NodeRegistry())
+        wm = WorkflowManager(node_api=api)
 
         # 3) Load editor JSON → in-memory graph
         WorkflowLoader(api).load_from_json(str(wf_path))
@@ -185,7 +185,7 @@ def _fetch_outputs_via_rest(base: str, prompt_id: str) -> dict:
         imgs = []
         for img in nval.get("images", []):
             # /view?filename=...&subfolder=...&type=output
-            q = f"filename={img['filename']}&subfolder={img.get('subfolder','')}&type={img.get('type','')}"
+            q = f"filename={img['filename']}&subfolder={img.get('subfolder', '')}&type={img.get('type', '')}"
             imgs.append(f"{base}/view?{q}")
         res[nkey] = {"images": imgs}
     return res

@@ -11,25 +11,30 @@ from ...core.types import RunState
 class ComfyConnector(IConnector):
     def __init__(self, base_url: str, auth: Optional[Dict[str, Any]] = None, timeout: float = 60.0) -> None:
         self._base = base_url.rstrip("/")
-        self._rest = ComfyRestClient(self._base)
+        self._auth = auth or {}
+        self._timeout = timeout
+        self._rest = ComfyRestClient(self._base, auth=self._auth, timeout=self._timeout)
         self._client_id: Optional[str] = None
         self._ws: Optional[ComfyWsClient] = None
         self._obs: Optional[IProgressObserver] = None
         self._last_status: Dict[str, Any] = {}
+
+    def set_timeout(self, timeout: float) -> None:
+        self._timeout = timeout
+        self._rest.set_timeout(timeout)
 
     def _ws_url(self, client_id: str) -> str:
         u = urllib.parse.urlparse(self._base)
         scheme = "wss" if u.scheme == "https" else "ws"
         return f"{scheme}://{u.hostname}:{u.port or (443 if scheme=='wss' else 80)}/ws?clientId={client_id}"
 
-    def open(self) -> None:
+    def open(self, client_id: Optional[str] = None) -> None:
         # nop until subscribe, ensured by post_workflow
-        pass
+        if client_id:
+            self._client_id = client_id
 
     def post_workflow(self, payload: Dict[str, Any], client_id: str) -> str:
         self._client_id = client_id
-        print('payload', payload)
-        print('client_id', client_id)
 
         res = self._rest.post("/prompt", {"prompt": payload, "client_id": client_id})
         prompt_id = res.get("prompt_id")
@@ -72,19 +77,42 @@ class ComfyConnector(IConnector):
         return self._last_status or {"state": RunState.running.value}
 
     def fetch_outputs(self, prompt_id: str) -> Dict[str, Any]:
-        hist = self._rest.get(f"/history/{prompt_id}")
-        outputs = {}
+        """
+        Handle both Comfy shapes:
+          - GET /history/{id} -> {"prompt": {...}, "outputs": {...}}
+          - GET /history      -> { "<id>": {"prompt": {...}, "outputs": {...}} }
+        """
+        outputs: Dict[str, Any] = {}
+        entry: Dict[str, Any] = {}
+        # 1) Try /history/{id}
         try:
-            nodes = list((hist.get(prompt_id) or {}).get("outputs", {}).items())
-            for node_id, node_out in nodes:
-                images = node_out.get("images") or []
+            data = self._rest.get(f"/history/{prompt_id}") or {}
+            if isinstance(data, dict):
+                entry = data.get(prompt_id) if prompt_id in data else data
+        except Exception:
+            entry = {}
+        # 2) Fallback to /history
+        if not entry:
+            try:
+                hist = self._rest.get("/history") or {}
+                entry = hist.get(prompt_id, {})
+            except Exception:
+                entry = {}
+        # 3) Normalize view URLs
+        try:
+            for node_id, node_out in (entry.get("outputs") or {}).items():
                 urls = []
-                for im in images:
-                    q = urllib.parse.urlencode({"filename": im["filename"], "subfolder": im["subfolder"], "type": im["type"]})
+                for im in (node_out.get("images") or []):
+                    q = urllib.parse.urlencode({
+                        "filename": im.get("filename", ""),
+                        "subfolder": im.get("subfolder", ""),
+                        "type": im.get("type", ""),
+                    })
                     urls.append(f"{self._base}/view?{q}")
                 outputs[node_id] = {"images": urls}
         except Exception:
-            pass
+            # keep it best‑effort
+            return {}
         return outputs
 
     def cancel(self, prompt_id: str) -> None:

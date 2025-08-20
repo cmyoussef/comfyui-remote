@@ -12,8 +12,11 @@ class ExecutionAPI:
         return self._wm.execute(ctx)
 
     def progress(self, handle_id: str):
-        # placeholder
-        return []
+        # Proxy to manager's best‑effort progress if available
+        try:
+            return self._wm.get_progress(handle_id)
+        except Exception:
+            return {}
 
     def cancel(self, handle_id: str) -> None:
         self._wm.cancel(handle_id)

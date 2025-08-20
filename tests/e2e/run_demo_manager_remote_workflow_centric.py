@@ -17,7 +17,7 @@ WF = REPO / "tests" / "resources" / "workflows" / "txt2img.json"
 
 def main():
     # 1) Explicit, long output/input/user dirs
-    base_runs = Path("./.comfy_outputs")
+    base_runs = Path("../.comfy_outputs")
     (base_runs / "out").mkdir(parents=True, exist_ok=True)
     (base_runs / "in").mkdir(parents=True, exist_ok=True)
     (base_runs / "user").mkdir(parents=True, exist_ok=True)
@@ -61,7 +61,7 @@ def main():
         return 0
     finally:
         try:
-            ComfyServerManager().stop()
+            srv.stop()
         except Exception:
             pass
 

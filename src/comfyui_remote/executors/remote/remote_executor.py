@@ -25,7 +25,7 @@ class RemoteExecutor(ExecutorBase):
     def prepare(self, graph, ctx: ExecutionContext) -> None:
         if not ctx or ctx.mode != "remote" or not ctx.base_url:
             raise ValueError("RemoteExecutor requires ExecutionContext(mode='remote', base_url=...)")
-        self._connector = ComfyConnector(base_url=ctx.base_url)
+        self._connector = ComfyConnector(base_url=ctx.base_url, auth=(ctx.auth if hasattr(ctx, "auth") else None))
 
     def submit(self, graph, ctx: ExecutionContext) -> str:
         if self._connector is None:

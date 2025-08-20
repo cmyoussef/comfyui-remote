@@ -5,12 +5,13 @@ import re
 from pathlib import Path
 from typing import Dict, Any, Optional, Iterable, List, Tuple
 
+from ...config.manager import ConfigManager
+from ...connectors.comfy.connector import ComfyConnector
 from ...core.base.workflow import ExecutionContext
 from ...executors.executor_factory import ExecutorFactory
 from ...handlers.output.output_handler import OutputHandler
 from ...nodes.core.node_core_api import NodeCoreAPI
 from ...nodes.core.node_registry import NodeRegistry
-from ...services.config_manager import ConfigManager
 from ...services.progress_service import ProgressService
 from ...services.validation_service import ValidationService
 from ...workflows.compiler.comfy_compiler import ComfyCompiler
@@ -24,8 +25,9 @@ class WMProgressObserver:
         self._svc = svc
 
     def update(self, event: Dict[str, Any]) -> None:
+        # Fan‑out to all subscribers; ignore best‑effort errors.
         try:
-            self._svc.update(event)
+            self._svc.publish(event)
         except Exception:
             pass
 
@@ -67,7 +69,7 @@ class WorkflowManager:
         self._output = output or OutputHandler()
         self._compiler = compiler or ComfyCompiler()
         self._executors = executor_factory or ExecutorFactory()
-
+        self._last_executor: Optional[ExecutorFactory] = None
         self._loaded_path: Optional[str] = None
         self._ctx: ExecutionContext = ExecutionContext(mode="local")
         self._last_handle_id: Optional[str] = None
@@ -130,13 +132,6 @@ class WorkflowManager:
         p = str(path)
         with open(p, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
-
-    # def save_prompt(self, path: str, ctx: Optional[ExecutionContext] = None) -> str:
-    #     payload = self.get_compiled_prompt(ctx)
-    #     p = Path(path)
-    #     p.parent.mkdir(parents=True, exist_ok=True)
-    #     p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    #     return str(p)
 
     # ---------- Indexing from file ----------
     def _build_index_from_file(self, path: str) -> None:
@@ -412,6 +407,7 @@ class WorkflowManager:
         _ = self.validate()
         use_ctx = ctx or self._ctx
         executor = self._executors.create(use_ctx.mode, use_ctx)
+        self._last_executor = executor  # <-- keep a handle for cancel()
 
         obs = WMProgressObserver(self._progress)
         try:
@@ -426,6 +422,51 @@ class WorkflowManager:
         except Exception:
             pass
         return result
+
+    def cancel(self, handle_id: str) -> None:
+        """
+        Best‑effort cancellation via the last executor, if available.
+        """
+        try:
+            ex = getattr(self, "_last_executor", None)
+            if ex is not None:
+                ex.cancel(handle_id)
+        except Exception:
+            pass
+
+    def results(self, handle_id: str) -> Dict[str, Any]:
+        """
+        Return collected artifacts/outputs for a run handle.
+        Uses the existing remote outputs path when applicable.
+        """
+        try:
+            return self.get_outputs(handle_id) if hasattr(self, "get_outputs") else {}
+        except Exception:
+            return {}
+
+    def get_progress(self, handle_id: str) -> Dict[str, Any]:
+        """
+        Best‑effort status: if outputs exist we consider it 'success', else 'running'.
+        """
+        try:
+            base = self._ctx.base_url or ""
+            if not base:
+                return {}
+            conn = ComfyConnector(base_url=base, auth=self._ctx.auth or {})
+            outs = conn.fetch_outputs(handle_id)
+            return {"state": "success"} if outs else {"state": "running"}
+        except Exception:
+            return {}
+
+    def get_outputs(self, handle_id: str) -> Dict[str, Any]:
+        try:
+            base = self._ctx.base_url or ""
+            if not base:
+                return {}
+            conn = ComfyConnector(base_url=base, auth=self._ctx.auth or {})
+            return conn.fetch_outputs(handle_id)
+        except Exception:
+            return {}
 
     # ---------- Debug helpers ----------
     def debug_index(self) -> Dict[str, Any]:

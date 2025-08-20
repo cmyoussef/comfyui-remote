@@ -17,9 +17,31 @@ class ComfyWsClient:
             data = json.loads(message)
         except Exception:
             return
-        prompt_id = (data.get("data") or {}).get("prompt_id") or (data.get("prompt_id"))
+
+        # Try to extract prompt_id from the message
+        pid = None
+        try:
+            payload = data.get("data") or {}
+            pid = payload.get("prompt_id") or data.get("prompt_id")
+            if pid is not None:
+                pid = str(pid)
+        except Exception:
+            pid = None
+
+        # Targeted dispatch (if we have a subscriber for this prompt_id)
+        if pid and pid in self._subscribers:
+            try:
+                self._subscribers[pid](data)
+            except Exception:
+                pass
+            return
+
+        # Fallback: broadcast to all
         for cb in list(self._subscribers.values()):
-            cb(data)
+            try:
+                cb(data)
+            except Exception:
+                pass
 
     def _on_open(self, _ws): pass
     def _on_close(self, _ws, *_): pass
@@ -37,7 +59,8 @@ class ComfyWsClient:
         self._thread.start()
 
     def subscribe(self, key: str, callback: Callable[[Dict[str, Any]], None]) -> None:
-        self._subscribers[key] = callback
+        # 'key' is typically the prompt_id
+        self._subscribers[str(key)] = callback
 
     def close(self) -> None:
         if self._app:

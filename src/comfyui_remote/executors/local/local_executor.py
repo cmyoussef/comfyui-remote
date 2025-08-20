@@ -27,7 +27,7 @@ class LocalExecutor(ExecutorBase):
                     opts[k] = ctx.extras[k]
         self._handle = self._server.start(opts)
         base = f"http://127.0.0.1:{self._handle.port}"
-        self._connector = ComfyConnector(base_url=base)
+        self._connector = ComfyConnector(base_url=base, auth=(ctx.auth if ctx else None))
 
     def submit(self, graph, ctx: ExecutionContext) -> str:
         compiler = ComfyCompiler()
@@ -52,7 +52,15 @@ class LocalExecutor(ExecutorBase):
         return self._connector.status(handle_id)
 
     def collect(self, handle_id: str):
-        return self._connector.fetch_outputs(handle_id)
+        try:
+            return self._connector.fetch_outputs(handle_id)
+        finally:
+            try:
+                if self._connector:
+                    self._connector.close()
+            finally:
+                if self._handle:
+                    self._server.stop()
 
     def cancel(self, handle_id: str):
         try:
