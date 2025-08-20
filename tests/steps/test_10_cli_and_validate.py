@@ -1,41 +1,55 @@
-import unittest, os, sys, json, tempfile, shutil
+import os
+import sys
+import json
+import shutil
+import tempfile
+import unittest
 from pathlib import Path
+
 from tests.utils.bootstrap import add_src_to_path, ensure_env
 add_src_to_path()
 
-RES = Path(__file__).resolve().parents[2] / "tests" / "resources" / "images"
-RES_IMG = RES / "tiny.png"
+# Reuse the same resource image you already have in tests/resources/images/
+RES_IMG = Path(__file__).resolve().parents[2] / "tests" / "resources" / "images" / "tiny.png"
 
-def _write_min_editor_json(path: Path):
-    data = {
-        "nodes": [
-            {
-                "id": 1, "type": "LoadImage",
-                "inputs": [],
-                "outputs": [{"name": "IMAGE", "type": "IMAGE", "slot_index": 0}],
-                "widgets_values": ["tiny.png", "image"]
-            },
-            {
-                "id": 2, "type": "SaveImage",
-                "inputs": [{"name": "images", "type": "IMAGE", "link": 1}],
-                "outputs": [],
-                "widgets_values": ["ComfyUI"]
+
+def _write_min_prompt_json(path: Path):
+    """
+    Minimal *prompt JSON* using NUMERIC keys and references.
+    LoadImage ("1") -> SaveImage ("2")
+    """
+    payload = {
+        "1": {
+            "class_type": "LoadImage",
+            "inputs": {
+                "image": "tiny.png"
             }
-        ],
-        "links": [[1, 1, 0, 2, 0, "IMAGE"]],
-        "last_node_id": 2, "last_link_id": 1, "version": 0.4
+        },
+        "2": {
+            "class_type": "SaveImage",
+            "inputs": {
+                "filename_prefix": "ComfyUI",
+                "images": ["1", 0]   # <— IMPORTANT: numeric key, not "n1"
+            }
+        }
     }
-    path.write_text(json.dumps(data), encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
 
 class TestStep10CLI(unittest.TestCase):
     def test_validate(self):
-        # Validate against txt2img (logic only)
+        ensure_env(self, "COMFYUI_HOME", "Set to your ComfyUI folder (contains main.py).")
         from comfyui_remote.cli.main import main
-        wf = Path(__file__).resolve().parents[2] / "tests" / "resources" / "workflows" / "txt2img.json"
-        old = sys.argv
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="cli_min_"))
+        wf = tmp_dir / "io_min.prompt.json"
+        _write_min_prompt_json(wf)
+
+        old = list(sys.argv)
         try:
-            sys.argv = ["prog","validate","--workflow",str(wf)]
-            code = main(); self.assertEqual(code, 0)
+            sys.argv = ["prog", "validate", "--workflow", str(wf)]
+            code = main()
+            self.assertEqual(code, 0)
         finally:
             sys.argv = old
 
@@ -43,26 +57,36 @@ class TestStep10CLI(unittest.TestCase):
         ensure_env(self, "COMFYUI_HOME", "Set to your ComfyUI folder (contains main.py).")
         from comfyui_remote.cli.main import main
 
-        # temp minimal editor JSON + IO dirs
+        # Write a minimal *prompt JSON*
         tmp_dir = Path(tempfile.mkdtemp(prefix="cli_min_"))
-        wf = tmp_dir / "io_min.json"
-        _write_min_editor_json(wf)
+        wf = tmp_dir / "io_min.prompt.json"
+        _write_min_prompt_json(wf)
 
+        # IO dirs + resource
         tmp_in = Path(tempfile.mkdtemp(prefix="comfy_in_"))
         tmp_out = Path(tempfile.mkdtemp(prefix="comfy_out_"))
         shutil.copy2(RES_IMG, tmp_in / "tiny.png")
 
+        # Ensure the server started by the CLI picks these up
         old_env = dict(os.environ)
-        os.environ["COMFY_INPUT_DIR"] = str(tmp_in)   # picked up by server manager if you wired it
+        os.environ["COMFY_INPUT_DIR"] = str(tmp_in)
         os.environ["COMFY_OUTPUT_DIR"] = str(tmp_out)
 
-        old = sys.argv
+        old = list(sys.argv)
         try:
-            sys.argv = ["prog","run","--workflow",str(wf),"--mode","local","--verbose"]
-            code = main(); self.assertEqual(code, 0)
+            sys.argv = ["prog", "run", "--workflow", str(wf), "--mode", "local", "--verbose"]
+            code = main()
+            # The CLI returns 0 on completion
+            self.assertEqual(code, 0, "run should return 0 on completion")
+
+            # Sanity check: an output PNG should exist
+            outs = list(tmp_out.glob("*.png"))
+            self.assertTrue(outs, f"No .png outputs found in {tmp_out}")
         finally:
             sys.argv = old
-            os.environ.clear(); os.environ.update(old_env)
+            os.environ.clear()
+            os.environ.update(old_env)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

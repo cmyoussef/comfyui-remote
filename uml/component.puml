@@ -1,0 +1,49 @@
+@startuml
+skinparam monochrome true
+skinparam shadowing false
+skinparam dpi 180
+
+package "Developer App/CLI" {
+  [WorkflowManager]
+  [ExecutorFactory]
+  [LocalExecutor]
+  [RemoteExecutor]
+  [ComfyCompiler]
+  [WorkflowLoader]
+  [OutputHandler]
+  [ValidationService]
+}
+
+package "Transport" {
+  [ComfyConnector]
+  [ComfyRestClient]
+  [ComfyWsClient]
+}
+
+package "Process mgmt" {
+  [ComfyServerManager]
+  [ConfigManager]
+}
+
+package "ComfyUI Server" {
+  [main.py]
+  [REST /prompt]
+  [WS /ws]
+  [Models + IO Dirs]
+}
+
+[WorkflowManager] --> [WorkflowLoader]
+[WorkflowManager] --> [ComfyCompiler]
+[WorkflowManager] --> [ExecutorFactory]
+[LocalExecutor] --> [ComfyServerManager]
+[LocalExecutor] --> [ComfyConnector]
+[RemoteExecutor] --> [ComfyConnector]
+[ComfyServerManager] --> [ConfigManager]
+[ComfyConnector] --> [ComfyRestClient]
+[ComfyConnector] --> [ComfyWsClient]
+[ComfyRestClient] --> [REST /prompt]
+[ComfyWsClient] --> [WS /ws]
+[REST /prompt] --> [main.py]
+[WS /ws] --> [main.py]
+[main.py] --> [Models + IO Dirs]
+@enduml

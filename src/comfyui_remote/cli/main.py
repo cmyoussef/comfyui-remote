@@ -1,51 +1,86 @@
-"""CLI entry point."""
 from __future__ import annotations
+import argparse, json
 
-import argparse
-import sys
+from ..workflows.manager.workflow_manager import WorkflowManager
+from ..core.base.workflow import ExecutionContext
 
-from .run_cmd import RunCommand
-from .validate_cmd import ValidateCommand
-from .templates_cmd import TemplatesCommand
+def _load_params(path):
+    if not path: return {}
+    txt = open(path, "r", encoding="utf-8").read()
+    try:
+        return json.loads(txt)
+    except Exception:
+        try:
+            import yaml  # optional
+            return yaml.safe_load(txt) or {}
+        except Exception:
+            return {}
 
+class RunCommand:
+    @staticmethod
+    def configure(p):
+        p.add_argument("--workflow","-w", required=True, help="Path to Comfy editor or prompt JSON")
+        p.add_argument("--params","-p", help="YAML/JSON overrides (simple name=value mapping)")
+        p.add_argument("--mode", choices=("local","remote"), default="local")
+        p.add_argument("--url", help="Remote base URL for --mode=remote")
+        p.add_argument("--token", help="Auth token")
+        p.add_argument("--verbose", action="store_true")
 
-def _build_parser() -> argparse.ArgumentParser:
+    def run(self, args) -> int:
+        try:
+            wm = WorkflowManager()  # NEW: defaults inside
+            wm.load(args.workflow)
+            overrides = _load_params(args.params)
+            if overrides:
+                wm.apply_params(overrides)
+
+            ctx = ExecutionContext(
+                mode=args.mode,
+                base_url=args.url or "",
+                auth={"token": args.token} if args.token else {},
+            )
+            result = wm.execute(ctx)
+            if args.verbose:
+                print("payload", wm.get_compiled_prompt(ctx))
+                print("[run] result:", result)
+            return 0
+        except Exception as e:
+            print("[run] error:", e)
+            return 1
+
+class ValidateCommand:
+    @staticmethod
+    def configure(p):
+        p.add_argument("--workflow","-w", required=True, help="Path to Comfy editor or prompt JSON")
+    def run(self, args) -> int:
+        try:
+            wm = WorkflowManager()  # defaults
+            wm.load(args.workflow)
+            errs = list(wm.validate())
+            if errs:
+                print("[validate] ERRORS:", errs)
+                return 1
+            print("[validate] OK")
+            return 0
+        except Exception as e:
+            print("[validate] error:", e)
+            return 1
+
+def _build_parser():
     p = argparse.ArgumentParser(prog="comfy", description="ComfyUI Remote CLI")
     sp = p.add_subparsers(dest="cmd", required=True)
 
     pr = sp.add_parser("run", help="Run a workflow")
     RunCommand.configure(pr)
+    pr.set_defaults(_cmd=RunCommand().run)
 
     pv = sp.add_parser("validate", help="Validate a workflow")
     ValidateCommand.configure(pv)
-
-    pt = sp.add_parser("templates", help="List/show templates")
-    TemplatesCommand.configure(pt)
-
-    # Lazy GUI (avoid importing Qt if not used)
-    sp.add_parser("gui", help="Launch GUI")
+    pv.set_defaults(_cmd=ValidateCommand().run)
 
     return p
 
-
-def main(argv: list[str] | None = None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
+def main() -> int:
     parser = _build_parser()
-    args = parser.parse_args(argv)
-
-    if args.cmd == "run":
-        return RunCommand().run(args) or 0
-    if args.cmd == "validate":
-        return ValidateCommand().run(args) or 0
-    if args.cmd == "templates":
-        return TemplatesCommand().run(args) or 0
-    if args.cmd == "gui":
-        from .gui_cmd import GuiCommand  # lazy
-        return GuiCommand().run(args) or 0
-
-    parser.print_help()
-    return 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    args = parser.parse_args()
+    return args._cmd(args)

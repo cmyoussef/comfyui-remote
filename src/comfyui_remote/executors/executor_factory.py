@@ -1,13 +1,14 @@
+# src/comfyui_remote/executors/executor_factory.py
 """Executor factory."""
-from typing import Optional
 from .local.local_executor import LocalExecutor
 from .remote.remote_executor import RemoteExecutor
 from ..core.base.executor import IExecutor
+from ..core.base.executor import ExecutorBase
 from ..core.base.workflow import ExecutionContext
 
 
 class ExecutorFactory:
-    def create(self, mode: str, ctx: ExecutionContext) -> IExecutor:
+    def create(self, mode: str, ctx: ExecutionContext) -> ExecutorBase:
         m = (mode or "local").lower()
         if m == "local":
             return LocalExecutor()

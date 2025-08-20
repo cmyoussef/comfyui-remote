@@ -1,117 +1,111 @@
-"""Executor base classes."""
 from __future__ import annotations
 
-import os
 import time
-from abc import ABC, abstractmethod
-from typing import Any, Optional, TYPE_CHECKING
-
-from .connector import IConnector
-
-if TYPE_CHECKING:
-    from .workflow import ExecutionContext
+from typing import Protocol, Optional, Dict, Any
 
 
-class IExecutor(ABC):
-    """Strategy for executing a workflow."""
-
-    @abstractmethod
-    def prepare(self, graph: Any, ctx: "ExecutionContext") -> None:
-        """Prep resources."""
-
-    @abstractmethod
-    def submit(self, graph: Any, ctx: "ExecutionContext") -> str:
-        """Submit work and return a handle."""
-
-    @abstractmethod
-    def poll(self, handle_id: str) -> dict:
-        """Return status for a handle."""
-
-    @abstractmethod
-    def collect(self, handle_id: str) -> dict:
-        """Collect outputs for a handle."""
-
-    @abstractmethod
-    def cancel(self, handle_id: str) -> None:
-        """Cancel a running handle."""
-
-    @abstractmethod
-    def execute(self, graph: Any, ctx: "ExecutionContext") -> dict:
-        """Template method to run end-to-end."""
+class IExecutor(Protocol):
+    def prepare(self, graph, ctx) -> None: ...
+    def submit(self, graph, ctx) -> str: ...
+    def poll(self, handle_id: str) -> Dict[str, Any]: ...
+    def collect(self, handle_id: str) -> Dict[str, Any]: ...
+    def cancel(self, handle_id: str) -> None: ...
 
 
-class ExecutorBase(IExecutor):
-    """Template + helpers for executors."""
+class ExecutorBase:
+    """
+    Shared 'execute' loop:
+      - prepare() -> submit() -> subscribe(observer) -> poll() -> collect()
+    Subclasses should:
+      - implement prepare/submit/poll/collect/cancel
+      - optionally expose 'connector()' that has subscribe(prompt_id, observer).
+    """
 
     def __init__(self) -> None:
-        self._connector: Optional[IConnector] = None
+        self._observer = None
+        self._debug = False
 
-    # ---- wiring helpers -------------------------------------------------
+    # ---- optional wiring ----
+    def set_observer(self, obs) -> None:
+        """Observer must have an 'update(event_dict)' method. Stored for WS subscription."""
+        self._observer = obs
 
-    def use_connector(self, connector: IConnector) -> None:
-        """Attach a connector."""
-        self._connector = connector
+    def enable_debug(self, on: bool = True) -> None:
+        self._debug = bool(on)
 
-    # ---- overridables ---------------------------------------------------
-
-    def prepare(self, graph: Any, ctx: "ExecutionContext") -> None:
-        """Default no-op."""
+    def connector(self):
+        """
+        Optional: return a connector that supports subscribe(prompt_id, observer).
+        Subclasses may override; default returns None.
+        """
         return None
 
-    @abstractmethod
-    def submit(self, graph: Any, ctx: "ExecutionContext") -> str:
-        """Must return a handle/prompt_id."""
+    # ---- abstract-ish: subclasses must implement the following ----
+    def prepare(self, graph, ctx) -> None:
         raise NotImplementedError
 
-    def poll(self, handle_id: str) -> dict:
-        """Default delegates to connector."""
-        if not self._connector:
-            raise RuntimeError("No connector bound")
-        return self._connector.status(handle_id)
+    def submit(self, graph, ctx) -> str:
+        raise NotImplementedError
 
-    def collect(self, handle_id: str) -> dict:
-        """Default delegates to connector."""
-        if not self._connector:
-            raise RuntimeError("No connector bound")
-        return self._connector.fetch_outputs(handle_id)
+    def poll(self, handle_id: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def collect(self, handle_id: str) -> Dict[str, Any]:
+        raise NotImplementedError
 
     def cancel(self, handle_id: str) -> None:
-        """Default delegates to connector."""
-        if not self._connector:
-            return
-        self._connector.cancel(handle_id)
+        raise NotImplementedError
 
-    # ---- template method ------------------------------------------------
+    # ---- public one-shot execution driver ----
+    def execute(self, graph, ctx) -> Dict[str, Any]:
+        """
+        Drive the whole run and return a normalized dict:
+            {
+              "handle_id": <prompt_id>,
+              "state": "success" | "error" | "timeout",
+              "artifacts": <dict from collect() or {}>,
+              "status": <last status dict>,
+            }
+        """
+        # default timeout/backoff; if ctx provides, use it
+        timeout_s = getattr(ctx, "timeout_s", 60.0)
+        interval_s = getattr(ctx, "poll_interval_s", 0.25)
 
-    def execute(self, graph: Any, ctx: "ExecutionContext") -> dict:
-        """Prepare → submit → poll → collect."""
+        # 1) prepare & submit
         self.prepare(graph, ctx)
-        handle = self.submit(graph, ctx)
+        handle_id = self.submit(graph, ctx)
 
-        # Poll loop (tunable via env)
-        max_iters = int(os.getenv("COMFY_POLL_ITERS", "50"))
-        sleep_s = float(os.getenv("COMFY_POLL_SLEEP", "0.2"))
-
-        status: dict = {"state": "submitted"}
-        for _ in range(max_iters):
+        # 2) subscribe progress observer if we have both connector & observer
+        conn = self.connector()
+        if conn is not None and self._observer is not None:
             try:
-                status = self.poll(handle) or {}
+                conn.subscribe(handle_id, self._observer)
             except Exception:
-                # Be tolerant; continue polling briefly.
-                status = status or {}
-            state = (status.get("state") or status.get("status") or "").lower()
-            if state in {"success", "error", "failed", "canceled", "cancelled"}:
+                # non-fatal: just continue without live WS updates
+                pass
+
+        # 3) poll until done
+        t0 = time.time()
+        last_status: Dict[str, Any] = {}
+        while time.time() - t0 < timeout_s:
+            st = self.poll(handle_id) or {}
+            last_status = st
+            state = st.get("state")
+            if state in ("success", "error"):
                 break
-            time.sleep(sleep_s)
+            time.sleep(interval_s)
+        else:
+            # timeout
+            try:
+                self.cancel(handle_id)
+            except Exception:
+                pass
+            return {"handle_id": handle_id, "state": "timeout", "artifacts": {}, "status": last_status}
 
+        # 4) collect artifacts
         try:
-            outputs = self.collect(handle)
+            artifacts = self.collect(handle_id) or {}
         except Exception:
-            outputs = {}
+            artifacts = {}
 
-        return {
-            "handle_id": handle,
-            "status": (status.get("state") or status.get("status") or "unknown"),
-            "details": status,
-            "outputs": outputs,
-        }
+        return {"handle_id": handle_id, "state": last_status.get("state", ""), "artifacts": artifacts, "status": last_status}

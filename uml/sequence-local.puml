@@ -1,0 +1,49 @@
+@startuml
+skinparam monochrome true
+skinparam shadowing false
+skinparam dpi 180
+
+actor Dev as Developer
+participant WM as WorkflowManager
+participant EF as ExecutorFactory
+participant LE as LocalExecutor
+participant SM as ComfyServerManager
+participant CC as ComfyCompiler
+participant CN as ComfyConnector
+participant OUT as OutputHandler
+
+Developer -> WM: load("txt2img.json")
+Developer -> WM: set_param_by_title("Main_prompt","text","…")
+Developer -> WM: execute(ctx=local)
+
+WM -> EF: create("local", ctx)
+EF --> WM: LocalExecutor
+
+WM -> LE: execute(graph, ctx)
+activate LE
+LE -> SM: start(opts via ConfigManager)
+SM --> LE: handle(port, pid, base)
+
+LE -> CC: compile(graph)
+CC --> LE: payload
+
+LE -> CN: open()
+LE -> CN: post_workflow(payload, client_id)
+CN --> LE: prompt_id
+LE -> CN: subscribe(prompt_id, observer)
+
+loop until {success|error}
+  LE -> CN: status(prompt_id)
+  CN --> LE: {state: running}
+end
+
+LE -> CN: fetch_outputs(prompt_id)
+CN --> LE: artifacts
+
+LE -> OUT: store(prompt_id, artifacts)
+LE -> SM: stop()
+deactivate LE
+
+LE --> WM: {state, artifacts}
+WM --> Developer: result
+@enduml

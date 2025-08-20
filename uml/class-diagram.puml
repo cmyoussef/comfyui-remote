@@ -1,0 +1,140 @@
+@startuml
+skinparam monochrome true
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam dpi 180
+
+package "comfyui_remote" {
+  class WorkflowManager {
+    +load(path)
+    +save_prompt(path)
+    +set_param_by_title(title, param, value) : int
+    +set_param_by_type(class_type, patch: Map) : int
+    +set_param_by_id(external_id, patch: Map) : int
+    +get_compiled_prompt(ctx?) : Map
+    +set_execution_context(ctx)
+    +execute(ctx?) : Map
+    --
+    -graph
+    -_loader
+    -_compiler
+    -_progress
+    -_validator
+    -_output
+    -_ctx
+  }
+
+  class WorkflowLoader {
+    +load_from_json(path, api)
+    --
+    .. attaches per node ..
+    .. _wm_raw_spec, _wm_ext_id ..
+    .. _wm_class_type, _wm_title  ..
+  }
+
+  class ComfyCompiler {
+    +compile(graph, ctx) : Map
+    --
+    .. uses loader-preserved ..
+    .. ids/titles/wires       ..
+  }
+
+  class ExecutorFactory {
+    +create(mode, ctx) : IExecutor
+  }
+
+  interface IExecutor {
+    +prepare(graph, ctx)
+    +submit(graph, ctx) : String
+    +poll(handle_id) : Map
+    +collect(handle_id) : Map
+    +cancel(handle_id)
+    +execute(graph, ctx) : Map
+  }
+
+  class LocalExecutor implements IExecutor
+  class RemoteExecutor implements IExecutor
+
+  class ComfyServerManager {
+    +start(opts, config_manager?) : Handle
+    +stop()
+  }
+
+  class ComfyConnector {
+    +open()
+    +post_workflow(prompt, client_id) : String
+    +subscribe(prompt_id, observer)
+    +status(prompt_id) : Map
+    +fetch_outputs(prompt_id) : Map
+    +cancel(prompt_id)
+    +close()
+  }
+
+  class ComfyRestClient {
+    +get(endpoint) : Map
+    +post(endpoint, json) : Map
+    +get_bytes(url) : bytes
+  }
+
+  class ComfyWsClient {
+    +open()
+    +subscribe(prompt_id, cb)
+    +close()
+  }
+
+  class NodeCoreAPI {
+    +create_node(...)
+    +graph_ref()
+  }
+
+  class NodeRegistry {
+    +register(type, cls)
+  }
+
+  class ValidationService {
+    +validate_graph(graph) : List
+  }
+
+  class ProgressService {
+    +update(event)
+  }
+
+  class OutputHandler {
+    +store(handle_id, artifacts) : Map
+  }
+
+  class ConfigManager {
+    +finalize() : ComfyConfig
+    +write_extra_paths_yaml(cfg) : String
+  }
+
+  class ExecutionContext {
+    +mode
+    +base_url
+    +auth
+    +extras
+  }
+
+  WorkflowManager --> WorkflowLoader
+  WorkflowManager --> ComfyCompiler
+  WorkflowManager --> ExecutorFactory
+  WorkflowManager --> ValidationService
+  WorkflowManager --> ProgressService
+  WorkflowManager --> OutputHandler
+
+  ExecutorFactory --> IExecutor
+  IExecutor <|.. LocalExecutor
+  IExecutor <|.. RemoteExecutor
+
+  LocalExecutor --> ComfyServerManager
+  LocalExecutor --> ComfyConnector
+  RemoteExecutor --> ComfyConnector
+
+  ComfyConnector --> ComfyRestClient
+  ComfyConnector --> ComfyWsClient
+
+  WorkflowLoader --> NodeCoreAPI
+  NodeCoreAPI --> NodeRegistry
+  ComfyServerManager --> ConfigManager
+}
+@enduml

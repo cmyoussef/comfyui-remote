@@ -1,60 +1,59 @@
-import unittest, os, tempfile, shutil, json
+import json, os, shutil, tempfile, time, unittest
 from pathlib import Path
 from tests.utils.bootstrap import add_src_to_path, ensure_env
 add_src_to_path()
 
-from comfyui_remote.core.base.workflow import ExecutionContext
 from comfyui_remote.nodes.core.node_registry import NodeRegistry
 from comfyui_remote.nodes.core.node_core_api import NodeCoreAPI
-from comfyui_remote.nodes.base.node_base import NodeBase, NodeMetadata
+from comfyui_remote.workflows.loader.workflow_loader import WorkflowLoader
 from comfyui_remote.executors.local.local_executor import LocalExecutor
+from comfyui_remote.core.base.workflow import ExecutionContext
 
-RES = Path(__file__).resolve().parents[2] / "tests" / "resources" / "images"
-RES_IMG = RES / "tiny.png"
+RES_IMG = Path(__file__).resolve().parents[2] / "tests" / "resources" / "images" / "tiny.png"
 
-class _Node(NodeBase): pass
+def _write_min_prompt_json(path: Path):
+    """
+    Minimal *prompt JSON* (not editor JSON):
+      LoadImage -> SaveImage
+    """
+    payload = {
+        "n1": {"class_type": "LoadImage", "inputs": {"image": "tiny.png"}},
+        "n2": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ComfyUI", "images": ["n1", 0]}},
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 class TestStep07SubmitLocal(unittest.TestCase):
     def test_submit(self):
         ensure_env(self, "COMFYUI_HOME", "Set to your ComfyUI folder (contains main.py).")
 
-        # Build a minimal, model-free graph: LoadImage -> SaveImage
-        api = NodeCoreAPI(NodeRegistry())
-
-        load_meta = NodeMetadata(type="LoadImage", label="LoadImage")
-        n_load = _Node(load_meta)
-        n_load.set_param("class_type", "LoadImage")
-        n_load.set_param("image", "tiny.png")
-        # output index map for compiler
-        n_load.set_param("_ui_out_name_to_index", {"IMAGE": 0})
-
-        save_meta = NodeMetadata(type="SaveImage", label="SaveImage")
-        n_save = _Node(save_meta)
-        n_save.set_param("class_type", "SaveImage")
-        n_save.set_param("filename_prefix", "ComfyUI")
-
-        api.graph_ref().add_node(n_load)
-        api.graph_ref().add_node(n_save)
-        api.graph_ref().connect(n_load.get_id(), "IMAGE", n_save.get_id(), "images")
-
-        # IO folders with the resource image
+        # Prepare IO dirs and resource image
         tmp_in = Path(tempfile.mkdtemp(prefix="comfy_in_"))
         tmp_out = Path(tempfile.mkdtemp(prefix="comfy_out_"))
-        tmp_in.mkdir(parents=True, exist_ok=True)
-        tmp_out.mkdir(parents=True, exist_ok=True)
-        print(RES_IMG, tmp_in / "tiny.png")
         shutil.copy2(RES_IMG, tmp_in / "tiny.png")
 
-        ctx = ExecutionContext(mode="local", extras={"input_dir": str(tmp_in), "output_dir": str(tmp_out)})
+        # Build a minimal *prompt JSON*, then load via WorkflowLoader
+        api = NodeCoreAPI(NodeRegistry())
+        wf_dir = Path(tempfile.mkdtemp(prefix="wf_"))
+        wf = wf_dir / "io_min.prompt.json"
+        _write_min_prompt_json(wf)
+        WorkflowLoader(api).load_from_json(str(wf))
 
+        # Execute locally
         exe = LocalExecutor()
+        ctx = ExecutionContext(mode="local", extras={"input_dir": str(tmp_in), "output_dir": str(tmp_out)})
         exe.prepare(api.graph_ref(), ctx)
-        handle = exe.submit(api.graph_ref(), ctx)
-        self.assertTrue(handle)
+        prompt_id = exe.submit(api.graph_ref(), ctx)
 
-        # We don't assert outputs; just ensure POST succeeded and status is accessible
-        _ = exe.poll(handle)
-        _ = exe.collect(handle)
+        # Poll until done
+        for _ in range(50):  # ~10s at 0.2s each
+            st = exe.poll(prompt_id)
+            if st.get("state") in ("success", "error"):
+                break
+            time.sleep(0.2)
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+        outs = exe.collect(prompt_id)
+        self.assertTrue(outs, "No outputs collected")
+
+        # Output dir should have an image produced by SaveImage
+        produced = list(tmp_out.glob("*.png"))
+        self.assertTrue(produced, f"No .png outputs in {tmp_out}")

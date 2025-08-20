@@ -1,38 +1,83 @@
-"""Remote executor."""
-from typing import Dict, Any
+from __future__ import annotations
+
 import uuid
-from ...core.base.executor import IExecutor
+from typing import Optional, Dict, Any
+
+from ...core.base.executor import ExecutorBase
 from ...core.base.workflow import ExecutionContext
-from ...nodes.core.graph import Graph
 from ...connectors.comfy.connector import ComfyConnector
 from ...workflows.compiler.comfy_compiler import ComfyCompiler
-from ...services.progress_service import ProgressEventAdapter
 
 
-class RemoteExecutor(IExecutor):
+class RemoteExecutor(ExecutorBase):
+    """
+    Executes a compiled graph on an already-running ComfyUI server.
+
+    Requires: ExecutionContext(mode="remote", base_url="http://host:port")
+    """
+
     def __init__(self) -> None:
-        self._connector: ComfyConnector = None
+        super().__init__()
+        self._connector: Optional[ComfyConnector] = None
+        self._current_client_id: Optional[str] = None
 
-    def prepare(self, graph: Graph, ctx: ExecutionContext) -> None:
-        self._connector = ComfyConnector(base_url=ctx.base_url, auth=ctx.auth)
-        self._connector.open()
+    # ---- ExecutorBase required API ----
+    def prepare(self, graph, ctx: ExecutionContext) -> None:
+        if not ctx or ctx.mode != "remote" or not ctx.base_url:
+            raise ValueError("RemoteExecutor requires ExecutionContext(mode='remote', base_url=...)")
+        self._connector = ComfyConnector(base_url=ctx.base_url)
 
-    def submit(self, graph: Graph, ctx: ExecutionContext) -> str:
-        client_id = str(uuid.uuid4())
-        payload = ctx.extras.get("_compiled_payload") or ComfyCompiler().compile(graph, ctx)
-        ctx.extras["_compiled_payload"] = payload
-        prompt_id = self._connector.post_workflow(payload, client_id=client_id)
-        observer = getattr(ctx, "progress_observer", None) or ProgressEventAdapter()
-        self._connector.subscribe(prompt_id, observer)
+    def submit(self, graph, ctx: ExecutionContext) -> str:
+        if self._connector is None:
+            raise RuntimeError("RemoteExecutor not prepared")
+
+        # Compile payload
+        payload = ComfyCompiler().compile(graph, ctx)
+        if self._debug:
+            print("[remote-exec] compiled payload:", payload)
+
+        # Use the SAME client_id for WS and REST
+        self._current_client_id = f"remote-{uuid.uuid4().hex[:8]}"
+        try:
+            # If open() accepts a client_id, use it; otherwise fall back
+            self._connector.open(client_id=self._current_client_id)  # type: ignore[call-arg]
+        except TypeError:
+            self._connector.open()
+
+        prompt_id = self._connector.post_workflow(payload, client_id=self._current_client_id)
         return prompt_id
 
     def poll(self, handle_id: str) -> Dict[str, Any]:
-        return self._connector.status(handle_id)
+        if self._connector is None:
+            raise RuntimeError("RemoteExecutor not prepared")
 
-    def cancel(self, handle_id: str) -> None:
-        self._connector.cancel(handle_id)
+        st = self._connector.status(handle_id) or {}
+        state = st.get("state")
+        if state:
+            return st
+
+        # Fallback if WS events didn't arrive: try /history and infer success
+        try:
+            outs = self._connector.fetch_outputs(handle_id)
+            if outs:  # If outputs are present, the prompt completed
+                return {"state": "success", "outputs_present": True}
+        except Exception:
+            pass
+
+        return st
 
     def collect(self, handle_id: str) -> Dict[str, Any]:
-        artifacts = self._connector.fetch_outputs(handle_id)
-        self._connector.close()
-        return {"handle_id": handle_id, "artifacts": artifacts}
+        if self._connector is None:
+            raise RuntimeError("RemoteExecutor not prepared")
+        return self._connector.fetch_outputs(handle_id)
+
+    def cancel(self, handle_id: str) -> None:
+        if self._connector:
+            try:
+                self._connector.cancel(handle_id)
+            finally:
+                self._connector.close()
+
+    # Optional hook so ExecutorBase can subscribe a progress observer
+    def connector(self):
+        return self._connector

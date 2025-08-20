@@ -1,0 +1,44 @@
+@startuml
+skinparam monochrome true
+skinparam shadowing false
+skinparam dpi 180
+
+actor Dev as Developer
+participant WM as WorkflowManager
+participant EF as ExecutorFactory
+participant RE as RemoteExecutor
+participant CC as ComfyCompiler
+participant CN as ComfyConnector
+participant OUT as OutputHandler
+
+Developer -> WM: set_execution_context(mode="remote", base_url)
+Developer -> WM: execute()
+
+WM -> EF: create("remote", ctx)
+EF --> WM: RemoteExecutor
+
+WM -> RE: execute(graph, ctx)
+activate RE
+
+RE -> CC: compile(graph)
+CC --> RE: payload
+
+RE -> CN: open()
+RE -> CN: post_workflow(payload, client_id)
+CN --> RE: prompt_id
+RE -> CN: subscribe(prompt_id, observer)
+
+loop until {success|error}
+  RE -> CN: status(prompt_id)
+  CN --> RE: {state: running}
+end
+
+RE -> CN: fetch_outputs(prompt_id)
+CN --> RE: artifacts
+
+RE -> OUT: store(prompt_id, artifacts)
+deactivate RE
+
+RE --> WM: {state, artifacts}
+WM --> Developer: result
+@enduml

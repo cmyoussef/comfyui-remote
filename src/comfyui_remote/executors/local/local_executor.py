@@ -1,13 +1,15 @@
 """Local executor."""
 from __future__ import annotations
+
 import os
 import uuid
-from ...core.base.connector import IConnector
-from ...connectors.comfy.server_manager import ComfyServerManager
+
 from ...connectors.comfy.connector import ComfyConnector
-from ...workflows.compiler.comfy_compiler import ComfyCompiler
+from ...connectors.comfy.server_manager import ComfyServerManager
 from ...core.base.executor import ExecutorBase
 from ...core.base.workflow import ExecutionContext
+from ...workflows.compiler.comfy_compiler import ComfyCompiler
+
 
 class LocalExecutor(ExecutorBase):
     def __init__(self):
@@ -31,14 +33,18 @@ class LocalExecutor(ExecutorBase):
         compiler = ComfyCompiler()
         payload = compiler.compile(graph, ctx)
         if os.getenv("COMFY_DEBUG"):
-            # payload dump for troubleshooting
             print("[local-exec] compiled payload:", payload)
 
         if self._connector is None:  # safety
             base = f"http://127.0.0.1:{self._handle.port}"
             self._connector = ComfyConnector(base_url=base)
-        self._connector.open()
+
         client_id = f"local-{uuid.uuid4().hex[:8]}"
+        try:
+            self._connector.open(client_id=client_id)  # type: ignore[call-arg]
+        except TypeError:
+            self._connector.open()
+
         prompt_id = self._connector.post_workflow(payload, client_id=client_id)
         return prompt_id
 
@@ -56,3 +62,6 @@ class LocalExecutor(ExecutorBase):
                 self._connector.close()
             if self._handle:
                 self._server.stop()
+
+    def connector(self):
+        return self._connector

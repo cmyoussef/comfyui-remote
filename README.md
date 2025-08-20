@@ -1,284 +1,412 @@
-# comfyui-remote
+---
 
-A client toolkit to **load**, **parameterize**, and **execute** ComfyUI workflows locally or remotely.
+# ComfyUI Remote Toolkit — Developer Guide
 
-## Overview
+> A small, testable layer that lets you **load** Comfy editor workflows, **patch** them programmatically, **compile** them to `/prompt` payloads, and **execute** them against a local or remote ComfyUI server with clean logging and artifacts.
 
-**comfyui-remote** provides a clean interface for automating ComfyUI workflows:
+---
 
-- Run **locally** (auto-start a ComfyUI server)
-- Run against a **remote** ComfyUI instance
-- Dispatch to a **render farm** via plugins (extensible architecture)
+## Table of Contents
 
-## Features
+* [Core ideas](#core-ideas)
+* [Repository layout](#repository-layout)
+* [Prerequisites](#prerequisites)
+* [Configuration](#configuration)
 
-- **Clean CLI** for automation and scripting
-- **Qt UI** (MVVM) for browsing and running workflows
-- **Stable API layer** for embedding in other applications
-- **Validation**, **logging**, and **progress events**
-- **Extensible architecture** for custom executors and nodes
+  * [Environment variables](#environment-variables)
+  * [Base config (YAML)](#base-config-yaml)
+  * [Model folder discovery](#model-folder-discovery)
+* [Quick start](#quick-start)
 
-## Installation
+  * [Run all **step** tests](#run-all-step-tests)
+  * [Run all **unit** tests](#run-all-unit-tests)
+  * [E2E demos](#e2e-demos)
+* [Developer workflow](#developer-workflow)
 
-```bash
-pip install comfyui-remote
-```
+  * [Load a workflow](#load-a-workflow)
+  * [Patch parameters (by title / by type / by id)](#patch-parameters-by-title--by-type--by-id)
+  * [Compile and inspect the payload](#compile-and-inspect-the-payload)
+  * [Execute (local vs remote)](#execute-local-vs-remote)
+  * [Fetch outputs](#fetch-outputs)
+* [Architecture overview](#architecture-overview)
 
-## Quick Start
+  * [Modules & responsibilities](#modules--responsibilities)
+  * [Execution flow (sequence)](#execution-flow-sequence)
+* [Logging & troubleshooting](#logging--troubleshooting)
+* [Extending the system](#extending-the-system)
+* [UML diagrams](#uml-diagrams)
 
-### CLI Usage
+---
 
-```bash
-# Local execution (auto-starts server if needed)
-comfy run --workflow path/to/workflow.json --mode local
+## Core ideas
 
-# Remote execution with authentication
-comfy run --workflow path/to/workflow.json --mode remote --url http://host:8188 --token $TOKEN
+* **Loader-aware compilation**: The `WorkflowLoader` ingests editor JSON and attaches preserved metadata to each node (`_wm_raw_spec`, `_wm_ext_id`, `_wm_class_type`, `_wm_title`). The `ComfyCompiler` uses those to emit a stable, compliant `/prompt` payload.
+* **Workflow-centric API**: The `WorkflowManager` is your one object for: load → patch → save → execute → collect.
+* **Environment + YAML config**: `ConfigManager` merges sane defaults with `COMFY_CONFIG` (YAML) and env vars, and `ComfyServerManager` launches ComfyUI with correct model paths and IO dirs.
+* **Symmetric local/remote execution**: `ExecutorFactory` returns `LocalExecutor` (starts ComfyUI itself) or `RemoteExecutor` (uses an existing base URL). Both use the same `ComfyConnector` (REST + WS) contract.
 
-# Parameter overrides
-comfy run -w workflow.json -p Steps=50 Seed=12345 PositivePrompt="a castle"
+---
 
-# Validate workflow
-comfy validate -w workflow.json
-
-# List available templates
-comfy templates list
-
-# Show template details
-comfy templates show txt2img
-
-# Launch GUI
-comfy gui
-```
-
-### Python API
-
-```python
-from comfyui_remote.api import WorkflowAPI, ExecutionAPI
-from comfyui_remote.core import ExecutionContext
-
-# Load workflow
-workflow_api = WorkflowAPI()
-workflow_api.load("workflow.json")
-
-# Set parameters
-workflow_api.set_params({
-    "Steps": 50,
-    "Seed": 12345,
-    "PositivePrompt": "a castle"
-})
-
-# Execute
-execution_api = ExecutionAPI()
-ctx = ExecutionContext(mode="local")
-result = execution_api.run(ctx)
-```
-
-## Architecture
-![Full Architecture Diagram](docs/comfyui_remote_architecture-comfyui_remote__Full_Architecture_Class_Diagram.svg)
-
-### Core Components
-
-#### 1. **Core Layer** (contracts & types)
-- `IExecutor`: Interface for workflow execution
-- `IConnector`: Interface for ComfyUI communication
-- `ExecutionContext`: Execution configuration
-
-#### 2. **Nodes & Graph**
-- `NodeBase`, `NodeMetadata`: Node abstraction with typed metadata
-- `Graph`: Nodes + connections representation
-- `NodeRegistry`/`NodeFactory`: Registry and factory for node types
-
-#### 3. **Workflows**
-- `TemplateRepository`: Manage workflow templates
-- `WorkflowLoader`: Import JSON/templates into graph
-- `ComfyCompiler`: Convert Graph → ComfyUI prompt JSON
-
-#### 4. **Execution**
-- `ExecutorFactory`: Select appropriate executor (local/remote)
-- `LocalExecutor`: Manages local ComfyUI server
-- `RemoteExecutor`: Connects to existing ComfyUI instance
-
-#### 5. **Connectors**
-- `ComfyServerManager`: Start/stop local ComfyUI
-- `ComfyRestClient`: HTTP communication
-- `ComfyWsClient`: WebSocket for progress streaming
-- `ComfyConnector`: Coordinates REST+WS communication
-
-#### 6. **Services**
-- `ValidationService`: Graph validation
-- `ProgressService`: Progress event distribution
-- `OutputHandler`: Artifact management
-- `ConfigManager`: Configuration handling
-- `LoggingService`: Centralized logging
-
-### Project Structure
+## Repository layout
 
 ```
-src/comfyui_remote/
-├── core/               # Interfaces, exceptions, types
-├── nodes/              # NodeBase, Graph, NodeCoreAPI
-├── workflows/          # Templates, loader, compiler
-├── executors/          # Local, remote, factory
-├── connectors/         # ComfyUI server integration
-├── services/           # Config, logging, progress, validation
-├── handlers/           # Output handling
-├── api/                # High-level facades
-├── cli/                # Command-line interface
-├── ui/qt/              # Qt GUI (MVVM)
-└── utils/              # Helper utilities
+src/
+  comfyui_remote/
+    config/
+      manager.py          # merges env + YAML + defaults; writes extra-model-paths YAML
+      types.py            # strongly-typed config dataclasses
+    connectors/
+      comfy/
+        server_manager.py # launches/stops ComfyUI using ConfigManager
+        connector.py      # REST + WS plumbing
+        rest_client.py
+        ws_client.py
+      session.py
+    core/
+      base/
+        executor.py       # ExecutorBase + concrete IExecutor interface
+        connector.py      # IConnector
+        workflow.py       # ExecutionContext, etc.
+      types.py
+    executors/
+      executor_factory.py # returns LocalExecutor or RemoteExecutor
+      local/local_executor.py
+      remote/remote_executor.py
+    handlers/
+      output/output_handler.py
+    nodes/
+      base/node_base.py
+      core/node_core_api.py
+      core/node_registry.py
+    services/
+      validation_service.py
+      progress_service.py
+      config_manager.py    # legacy; new config lives in comfyui_remote/config/*
+    workflows/
+      loader/workflow_loader.py
+      manager/workflow_manager.py
+      compiler/comfy_compiler.py
+
+tests/
+  resources/workflows/*.json
+  steps/*.py              # integration tests that hit a live ComfyUI
+  unit/*.py               # isolated tests
+  e2e/                    # runnable demos
 ```
 
-## Execution Flow
+---
 
-### Local Workflow Execution
+## Prerequisites
 
-1. Load workflow (JSON/template) → build `Graph`
-2. Compile graph → ComfyUI prompt payload
-3. Start local ComfyUI server (if needed)
-4. Submit workflow with unique `client_id`
-5. Stream progress via WebSocket
-6. Collect outputs via REST API
-7. Store artifacts and cleanup
+* **Python**: 3.12+
+* **ComfyUI**: Either a source checkout or the Windows Electron build
+  Set `COMFYUI_HOME` to the folder containing `main.py`.
+* **Models**: At least one SD checkpoint (e.g. `v1-5-pruned-emaonly-fp16.safetensors`) in a path listed under `models.checkpoints` in your config.
 
-### Remote Workflow Execution
-
-Same as local, but uses existing ComfyUI instance at specified URL.
+---
 
 ## Configuration
 
 ### Environment variables
 
-- `COMFYUI_HOME` — **required** for steps that start a real server.  
-  Points to the folder that contains `main.py`.
+* `COMFYUI_HOME` (required): path to the directory containing `main.py`
 
-  Examples:
-  - Windows (Electron):  
+  * Example (Windows Electron):
     `C:\Users\<you>\AppData\Local\Programs\@comfyorgcomfyui-electron\resources\ComfyUI`
+* `COMFY_CONFIG` (optional): path to your YAML config (see below)
+* `COMFY_DEBUG` (optional): set to any value to dump compiled payloads to stdout
 
-Optional:
-- `COMFY_PORT` — fixed port; otherwise a free ephemeral port is chosen.
-- `COMFY_LISTEN` — host address; default `127.0.0.1`.
+### Base config (YAML)
 
+We keep config in **YAML** because ComfyUI’s `extra_model_paths.yaml` is YAML.
+Put this in `configs/base.windows.yaml` and set `COMFY_CONFIG` to that file:
 
-### Execution Context
+```yaml
+home: "C:/Users/you/AppData/Local/Programs/@comfyorgcomfyui-electron/resources/ComfyUI"
 
-Configure execution via `ExecutionContext`:
-- `mode`: "local" or "remote"
-- `base_url`: ComfyUI server URL (for remote mode)
-- `auth.token`: Authentication token
+server:
+  host: "127.0.0.1"
+  port: 0             # 0 -> find free port automatically
+  disable_cuda_malloc: false
+  dont_print_server: false
+  extra_args: []      # pass through if you need Comfy flags
 
-## Extensibility
+io:
+  input_dir:  ""      # can be overridden by tests / demo
+  output_dir: ""
+  user_dir:   ""
+  temp_dir:   ""
 
-### Custom Nodes
+models:
+  # EITHER point to a single root folder (autodetect folders inside) ...
+  root: "E:/comfyui/comfyui/models"
 
-Register custom node types:
+  # ... OR specify specific lists per family (overrides `root` for that key):
+  checkpoints:     []
+  vae:             []
+  clip:            []
+  clip_vision:     []
+  diffusion_models:[]
+  unet:            []
+  loras:           []
+  embeddings:      []
+  controlnet:      []
+  upscale_models:  []
+  configs:         []
+  custom_nodes:    ["E:/comfyui/comfyui/custom_nodes"]
 
-```python
-from comfyui_remote.nodes import NodeRegistry, NodeBase
-
-class CustomNode(NodeBase):
-    # Implementation
-    pass
-
-registry = NodeRegistry()
-registry.register("CustomNode", CustomNode)
+env: {}               # additional env vars for the ComfyUI process
 ```
 
-### Custom Executors
+### Model folder discovery
 
-Implement `IExecutor` for custom execution strategies:
+If you set `models.root`, the config layer will expand any **known subfolders** that exist under that root (e.g., `checkpoints`, `vae`, `clip`, `loras`, …). You can still override any one category explicitly by listing it—explicit lists take precedence over the root auto‑discovery.
 
-```python
-from comfyui_remote.core import IExecutor
+---
 
-class FarmExecutor(IExecutor):
-    def prepare(self, graph, ctx):
-        # Setup farm job
-        pass
-    
-    def submit(self, graph, ctx):
-        # Submit to farm
-        return job_id
-    
-    # ... other methods
-```
+## Quick start
 
-### Custom Compilers
+### Run all **step** tests
 
-Replace the default compiler:
-
-```python
-from comfyui_remote.workflows import IGraphCompiler
-
-class CustomCompiler(IGraphCompiler):
-    def compile(self, graph, ctx):
-        # Custom compilation logic
-        return prompt_json
-```
-
-## Error Handling
-
-The module provides specific exception types:
-
-- `ValidationError`: Invalid graph or parameters
-- `ServerNotReady`: Local server startup failure
-- `SubmissionError`: Workflow submission failure
-- `ConnectorError`: Communication errors
-
-## UI Architecture (MVVM)
-
-The Qt UI follows Model-View-ViewModel pattern:
-
-- **Views**: `MainWindow` and UI components
-- **ViewModels**: `WorkflowViewModel`, `ParametersModel`, `RunsModel`
-- **Controllers**: `RunController` connects UI and business logic
-- **Theme**: Centralized theme management via QSS
-
-## Design Principles
-
-1. **Separation of Concerns**: Clear boundaries between orchestration, server control, and communication
-2. **No Side Effects**: Explicit initialization, no hidden state changes
-3. **Interface-First**: Clean abstractions enable substitution
-4. **Observable Progress**: Central event system for UI/CLI updates
-5. **Minimal Dependencies**: Only essential packages required
-
-## Development
-
-### Testing
+From repo root:
 
 ```bash
-pytest tests/
+pytest -q tests/steps
 ```
 
-### Building
+(These spawn ComfyUI; make sure `COMFYUI_HOME` is set and you have a valid config.)
+
+### Run all **unit** tests
 
 ```bash
-python -m build
+pytest -q tests/unit
 ```
 
-### Contributing
+(These use fakes and do not require a ComfyUI instance.)
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
+### E2E demos
 
-## Future Enhancements
+**Manager‑centric remote run** (server starts & stops within the script):
 
-- Schema-driven parameter forms via `/object_info`
-- Robust WebSocket reconnection with backoff
-- Pluggable authentication (API keys, OAuth, proxies)
-- Farm executor plugins via namespace packages
-- Rich progress UI with per-node status and ETA
+```bash
+python tests/e2e/run_demo_manager_remote_workflow_centric.py
+```
 
-## License
+What it does:
+
+1. Starts ComfyUI (`ComfyServerManager`) with clean I/O dirs.
+2. Creates a `WorkflowManager`, loads `txt2img.json`.
+3. Patches the text prompt by **node title** (`"Main_prompt"`).
+4. Compiles the payload with `ComfyCompiler`.
+5. Executes in **remote** mode against the server it just started.
+6. Prints state and artifact info; saves the compiled prompt for inspection.
+
+---
+
+## Developer workflow
+
+### Load a workflow
+
+```python
+from comfyui_remote.workflows.manager.workflow_manager import WorkflowManager
+
+wm = WorkflowManager()  # default services inside
+wm.load("tests/resources/workflows/txt2img.json")  # editor JSON
+```
+
+The loader preserves the editor information on each node:
+
+* `_wm_raw_spec` — canonical `{class_type, inputs, _meta:{title}}`
+* `_wm_ext_id` — the original editor id (e.g., "6")
+* `_wm_class_type` — e.g. `CLIPTextEncode`
+* `_wm_title` — human name if present
+
+### Patch parameters (by title / by type / by id)
+
+* **By title** (human‑friendly, resilient):
+
+```python
+wm.set_param_by_title("Main_prompt", "text",
+    "A photoreal glass bottle in an ocean, pyramids inside, cinematic lighting")
+```
+
+* **By type**:
+
+```python
+wm.set_param_by_type("KSampler", {"seed": 42, "steps": 25})
+```
+
+* **By external id** (exact editor id):
+
+```python
+wm.set_param_by_id("6", {"text": "New prompt"})
+```
+
+> These methods only update **primitive** parameters; connection wires stay intact as loaded.
+
+### Compile and inspect the payload
+
+```python
+payload = wm.get_compiled_prompt()
+wm.save_prompt(".comfy_outputs/prompt.json")
+```
+
+The compiler:
+
+* Preserves original node keys (editor ids) when available.
+* Sanitizes `SaveImage.filename_prefix`.
+* Normalizes connections (`["6","IMAGE"] → ["6", 0]`).
+* Coerces common scalar types (`seed`:int, `cfg`:float, etc.).
+
+### Execute (local vs remote)
+
+**Remote** (you already have a server):
+
+```python
+from comfyui_remote.core.base.workflow import ExecutionContext
+
+wm.set_execution_context(ExecutionContext(mode="remote", base_url="http://127.0.0.1:64876"))
+result = wm.execute()
+print(result["state"], result["artifacts"])
+```
+
+**Local** (Toolkit will start ComfyUI):
+
+```python
+wm.set_execution_context(ExecutionContext(mode="local"))
+result = wm.execute()
+```
+
+Under the hood:
+
+* `ExecutorFactory` returns `LocalExecutor` or `RemoteExecutor`.
+* `LocalExecutor` spawns a server via `ComfyServerManager`, then posts/monitors the prompt.
+* Both executors use `ComfyConnector` (REST + WebSocket).
+
+### Fetch outputs
+
+If artifacts contain view URLs, you can fetch bytes via `ComfyRestClient` or use the files saved under the configured ComfyUI `output_dir`.
+
+---
+
+## Architecture overview
+
+### Modules & responsibilities
+
+* **ConfigManager** (`config/manager.py`)
+
+  * Loads YAML (via `COMFY_CONFIG`), merges env + defaults.
+  * Performs model root auto-discovery.
+  * Writes a **temporary** `extra_model_paths.yaml` for ComfyUI.
+
+* **ComfyServerManager** (`connectors/comfy/server_manager.py`)
+
+  * Launches/stops a ComfyUI process, wiring the IO dirs and the extra model paths YAML.
+  * Health-checks `/object_info` before returning.
+
+* **NodeRegistry / NodeCoreAPI** (`nodes/core`)
+
+  * Minimal graph API used by loader/manager to create nodes and edges.
+
+* **WorkflowLoader** (`workflows/loader/workflow_loader.py`)
+
+  * Parses editor JSON, normalizes to internal nodes, attaches `_wm_*` attributes, and builds a fast **title/id/type index** for later lookups.
+
+* **ComfyCompiler** (`workflows/compiler/comfy_compiler.py`)
+
+  * Converts the in‑memory graph into a compliant `/prompt` payload.
+  * Preserves editor ids and titles; sanitizes and normalizes inputs.
+
+* **ComfyConnector** (`connectors/comfy/connector.py`)
+
+  * Thin facade over REST (`rest_client.py`) + WS (`ws_client.py`).
+  * `post_workflow`, `subscribe`, `status`, `fetch_outputs`, `cancel`.
+
+* **Executors** (`executors/*`)
+
+  * `LocalExecutor`: start server → compile → submit → wait → collect → stop.
+  * `RemoteExecutor`: compile → submit (no spawning) → wait → collect.
+
+* **WorkflowManager** (`workflows/manager/workflow_manager.py`)
+
+  * End‑user API: `load`, `set_param_by_*`, `save_prompt`, `execute`.
+  * Internally uses `ExecutorFactory`, `ValidationService`, `ProgressService`, `OutputHandler`.
+
+* **Services**
+
+  * `ValidationService`: syntax/sanity checks on the graph.
+  * `ProgressService`: WS progress notifications fan‑out.
+  * `OutputHandler`: saves run manifests, normalizes artifact metadata.
+
+### Execution flow (sequence)
+
+**Local run**
+
+1. `WorkflowManager.execute(ctx=local)`
+2. `ExecutorFactory.create("local")` → `LocalExecutor`
+3. `LocalExecutor.prepare()` → `ComfyServerManager.start()`
+4. `ComfyCompiler.compile(graph)` → payload
+5. `ComfyConnector.open()` → `post_workflow(payload, client_id)`
+6. `ComfyConnector.subscribe()` WS events → `ProgressService`
+7. Poll `status()` until `success/error` → `fetch_outputs()`
+8. `OutputHandler.store()` → manifest
+9. `ComfyServerManager.stop()`
+
+**Remote run** is identical, minus step 3.
+
+---
+
+## Logging & troubleshooting
+
+* Set `--verbose` on the CLI or `COMFY_DEBUG=1` to dump payloads.
+* Server logs are written under `%TEMP%/comfyui-remote/comfy-<port>.log`.
+* Common issues:
+
+  * **`prompt_outputs_failed_validation` / `value_not_in_list ckpt_name`**
+    Your model folders were not visible to ComfyUI. Fix `models.root` or specific `models.checkpoints` entries; confirm the exact filename exists.
+  * **`Invalid image file`** on `LoadImage`
+    Make sure the file is inside the configured `input_dir` (server side).
+  * **`Saving image outside the output folder`**
+    We sanitize `filename_prefix`, but ensure you don’t pass paths in prefix and that `output_dir` is correctly set when launching the server.
+  * **Server doesn’t start / `TypeError` in extra paths**
+    Use YAML config (not JSON), and let `ConfigManager` render a proper `extra_model_paths.yaml`. Do **not** pass a list where Comfy expects a scalar or a `|` multi-line block.
+
+---
+
+## Extending the system
+
+* **New executors**: implement `IExecutor` (`submit/poll/collect/cancel/execute`) and register in `ExecutorFactory`.
+* **Alternate connectors**: implement `IConnector` if you need a different transport/protocol.
+* **Custom nodes**: Loader preserves everything the editor JSON provides; your node can expose richer params via `NodeBase.params()` which the compiler will overlay.
+
+---
+
+## UML diagrams
+
+> You can paste these into any Mermaid‑enabled viewer (e.g., GitHub, VS Code Mermaid).
+
+### 1) Class diagram — core
+
+**`uml/class-diagram.puml`**
+
+![class-diagram.svg](uml/class-diagram.svg)
+
+### 2) Sequence — **local** run
+
+**`uml/sequence-local.puml`**
+
+![sequence-local.svg](uml/sequence-local.svg)
+
+### 3) Sequence — **remote** run
+
+**`uml/sequence-remote.puml`**
+
+![sequence-remote.svg](uml/sequence-remote.svg)
+
+### 4) Component — high level
+
+**`uml/component.puml`**
+
+![component.svg](uml/component.svg)
 
 
-
-## Support
-
-For issues and questions:
-- GitHub Issues: https://github.com/cmyoussef/comfyui-remote.git
-- Documentation: [docs-url is coming]
