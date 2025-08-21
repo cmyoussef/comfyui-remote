@@ -12,11 +12,15 @@ from typing import Optional, Dict, Any, List
 
 from ...config.manager import ConfigManager, RuntimeConfig
 from ...config.types import ComfyConfig
+from .server_registry import ServerRegistry
 
 
-def _find_free_port() -> int:
+def _find_free_port(host: str) -> int:
+    """
+    Bind to (host, 0) to let the OS assign a free port on that host's interface.
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
+        s.bind((host, 0))
         return s.getsockname()[1]
 
 
@@ -40,7 +44,6 @@ def _locate_main_py(home_hint: str) -> Path:
       2) COMFYUI_HOME env (if valid)
       3) current working directory (if it's a ComfyUI dir)
     """
-    # 1) explicit config
     if home_hint:
         hp = Path(home_hint)
         if (hp / "main.py").exists():
@@ -48,12 +51,10 @@ def _locate_main_py(home_hint: str) -> Path:
         if (hp / "ComfyUI" / "main.py").exists():
             return hp / "ComfyUI"
 
-    # 2) env
     env_home = _env_get_home()
     if env_home:
         return env_home
 
-    # 3) current working dir fallback
     cwd = Path.cwd()
     if (cwd / "main.py").exists():
         return cwd
@@ -67,32 +68,34 @@ def _locate_main_py(home_hint: str) -> Path:
 
 
 class _ProcHandle:
-    __slots__ = ("pid", "port", "base_url", "log_path", "proc")
+    __slots__ = ("id", "pid", "host", "port", "base_url", "log_path", "proc")
 
-    def __init__(self, pid: int, port: int, log_path: str, proc: subprocess.Popen):
+    def __init__(self, sid: str, pid: int, host: str, port: int, log_path: str, proc: subprocess.Popen):
+        self.id = sid
         self.pid = pid
+        self.host = host
         self.port = port
-        self.base_url = f"http://127.0.0.1:{port}"
+        self.base_url = f"http://{host}:{port}"
         self.log_path = log_path
         self.proc = proc
 
 
 class ComfyServerManager:
     """
-    Clean process manager for ComfyUI:
-      - Reads layered YAML/JSON with ConfigManager (via COMFY_CONFIG)
-      - Emits a Comfy‑compatible extra_model_paths.yaml (flat shape)
-      - Spawns Comfy with correct argv/env
-      - Waits for /object_info to become available
-      - Graceful stop
-
-    Backward‑compatible overrides:
-      - `start(opts)` may pass {input_dir, output_dir, temp_dir, user_dir}
-        to override I/O dirs for a single run (used by tests/demo).
+    Robust process manager for ComfyUI:
+      - Host-aware (not hardcoded to 127.0.0.1)
+      - Registry-backed (JSONL + lockfile) so other tools can discover servers
+      - YAML/JSON config via ConfigManager (COMFY_CONFIG)
+      - Emits extra_model_paths.yaml when needed
+      - Spawns ComfyUI, waits until /object_info responds, then registers "running"
+      - Graceful stop registers "stopped"
     """
 
-    def __init__(self, config_manager: Optional[ConfigManager] = None) -> None:
+    def __init__(self, config_manager: Optional[ConfigManager] = None,
+                 registry: Optional[ServerRegistry] = None,
+                 registry_path: Optional[str] = None) -> None:
         self._cfg_mgr = config_manager or ConfigManager()
+        self._registry = registry or ServerRegistry(registry_path)
         self._handle: Optional[_ProcHandle] = None
 
     # --------------- public API ---------------
@@ -107,39 +110,58 @@ class ComfyServerManager:
         timeout: float = 45.0,
     ) -> _ProcHandle:
         """
-        Start ComfyUI with the resolved configuration.
+        Start ComfyUI with resolved configuration.
 
-        :param opts: optional per‑run I/O overrides:
-                     {"input_dir": "...", "output_dir": "...", "temp_dir": "...", "user_dir": "..."}
+        :param opts: optional per‑run overrides:
+                     {
+                       "host": "...", "port": 0|int,
+                       "input_dir": "...", "output_dir": "...",
+                       "temp_dir": "...", "user_dir": "...",
+                       "tags": ["farm"]   # recorded in the registry,
+                       "meta": {...}      # arbitrary metadata to store in the registry
+                     }
         :param timeout: seconds to wait for /object_info
         :return: process handle
         """
         if self._handle is not None:
             raise RuntimeError("ComfyUI server already started")
 
+        opts = dict(opts or {})
+        tags: List[str] = list(opts.pop("tags", []) or [])
+        meta: Dict[str, Any] = dict(opts.pop("meta", {}) or {})
+
         # 1) Resolve config
         cfg = self._cfg_mgr.finalize()
 
-        # Per‑run overrides (commonly used in tests/e2e demo)
-        if opts:
-            if "input_dir" in opts:
-                cfg.io.input_dir = str(opts["input_dir"])
-            if "output_dir" in opts:
-                cfg.io.output_dir = str(opts["output_dir"])
-            if "temp_dir" in opts:
-                cfg.io.temp_dir = str(opts["temp_dir"])
-            if "user_dir" in opts:
-                cfg.io.user_dir = str(opts["user_dir"])
+        # Overrides: host/port
+        host_override = str(opts.pop("host", "") or "").strip()
+        if host_override:
+            cfg.server.host = host_override
+        if not cfg.server.host:
+            cfg.server.host = "127.0.0.1"
+
+        port_override = opts.pop("port", None)
+        if isinstance(port_override, int):
+            cfg.server.port = port_override
+
+        # Per‑run IO overrides (commonly used in tests/e2e demo)
+        if "input_dir" in opts:
+            cfg.io.input_dir = str(opts["input_dir"])
+        if "output_dir" in opts:
+            cfg.io.output_dir = str(opts["output_dir"])
+        if "temp_dir" in opts:
+            cfg.io.temp_dir = str(opts["temp_dir"])
+        if "user_dir" in opts:
+            cfg.io.user_dir = str(opts["user_dir"])
 
         # Ensure port is chosen
         if not cfg.server.port or cfg.server.port == 0:
-            cfg.server.port = _find_free_port()
+            cfg.server.port = _find_free_port(cfg.server.host)
 
         # 2) Locate Comfy main.py
         home_dir = _locate_main_py(cfg.paths.home)
         main_py = home_dir / "main.py"
         if not main_py.exists():
-            # If they pointed to parent of ComfyUI, try ComfyUI/main.py
             alt = home_dir / "ComfyUI" / "main.py"
             if alt.exists():
                 main_py = alt
@@ -158,7 +180,7 @@ class ComfyServerManager:
         # 4) Prepare logs and environment
         log_dir = Path(tempfile.gettempdir()) / "comfyui-remote"
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = str(log_dir / f"comfy-{cfg.server.port}.log")
+        log_path = str(log_dir / f"comfy-{cfg.server.host.replace(':','_')}-{cfg.server.port}.log")
         log_f = open(log_path, "w", encoding="utf-8", buffering=1)
 
         env = os.environ.copy()
@@ -175,18 +197,28 @@ class ComfyServerManager:
         )
 
         # 6) Wait until ready
-        self._wait_until_listening(cfg.server.port, log_path, timeout=timeout)
+        self._wait_until_listening(cfg.server.host, cfg.server.port, log_path, timeout=timeout)
 
-        # Minimal, clean startup line (kept for your step tests)
-        base = f"http://127.0.0.1:{cfg.server.port}"
+        base = f"http://{cfg.server.host}:{cfg.server.port}"
         print(f"[comfyui-remote] Started ComfyUI pid={proc.pid} url={base} log={log_path}")
 
-        self._handle = _ProcHandle(proc.pid, cfg.server.port, log_path, proc)
+        # 7) Register as running
+        sid = self._registry.register_start(
+            base_url=base,
+            host=cfg.server.host,
+            port=cfg.server.port,
+            pid=proc.pid,
+            log_path=log_path,
+            tags=tags,
+            meta=meta,
+        )
+
+        self._handle = _ProcHandle(sid, proc.pid, cfg.server.host, cfg.server.port, log_path, proc)
         return self._handle
 
     def stop(self) -> None:
         """
-        Gracefully stop the spawned ComfyUI process (if any).
+        Gracefully stop the spawned ComfyUI process (if any), and mark registry 'stopped'.
         """
         if not self._handle:
             return
@@ -194,24 +226,33 @@ class ComfyServerManager:
             self._handle.proc.terminate()
             self._handle.proc.wait(timeout=8.0)
         except Exception:
-            # Fallback if terminate doesn't exit in time
             try:
                 self._handle.proc.kill()
             except Exception:
                 pass
         finally:
+            try:
+                self._registry.register_stop(self._handle.id)
+            except Exception:
+                pass
             print(f"[comfyui-remote] Stopped ComfyUI pid={self._handle.pid} log={self._handle.log_path}")
             self._handle = None
 
+    # --------------- discovery helpers ---------------
+
+    def list_known(self) -> List[Dict[str, Any]]:
+        """Return a simple dict view of known servers (latest state)."""
+        return [rec.to_dict() for rec in self._registry.list_latest()]
+
     # --------------- internals ---------------
 
-    def _wait_until_listening(self, port: int, log_path: str, timeout: float) -> None:
+    def _wait_until_listening(self, host: str, port: int, log_path: str, timeout: float) -> None:
         """
-        Poll /object_info until the server becomes responsive, or dump log tail on timeout.
+        Poll http://{host}:{port}/object_info until the server becomes responsive, or dump log tail on timeout.
         """
         import requests
 
-        base = f"http://127.0.0.1:{port}"
+        base = f"http://{host}:{port}"
         start = time.time()
         while time.time() - start < timeout:
             try:
@@ -229,3 +270,26 @@ class ComfyServerManager:
         except Exception:
             pass
         raise TimeoutError(f"ComfyUI did not respond on {base} within {timeout}s")
+
+    # -------- utility for CLI 'stop --url' on local host --------
+    @staticmethod
+    def kill_local_pid(pid: int) -> bool:
+        try:
+            if os.name == "nt":
+                import psutil  # optional; fallback below if unavailable
+                try:
+                    p = psutil.Process(pid)
+                    p.terminate()
+                    p.wait(8)
+                    return True
+                except Exception:
+                    pass
+            # portable fallback
+            os.kill(pid, 15)  # SIGTERM on posix, ignored on windows (won't raise)
+            return True
+        except Exception:
+            try:
+                os.kill(pid, 9)  # SIGKILL posix; on Windows this will error; ignore
+                return True
+            except Exception:
+                return False

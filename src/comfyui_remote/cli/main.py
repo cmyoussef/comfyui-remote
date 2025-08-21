@@ -3,10 +3,14 @@ import argparse
 
 from .run_cmd import RunCommand
 from .validate_cmd import ValidateCommand
+from .server_cmd import ServerCommand
+from .attach_cmd import AttachConnectCommand
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="comfy", description="ComfyUI Remote CLI")
     sp = p.add_subparsers(dest="cmd", required=True)
+    ServerCommand.add_top_level_aliases(sp)
+    AttachConnectCommand.configure_top_level(sp)
 
     # run
     run = RunCommand()
@@ -20,6 +24,9 @@ def _build_parser() -> argparse.ArgumentParser:
     ValidateCommand.configure(pv)
     pv.set_defaults(_cmd=val.run)
 
+    ps = sp.add_parser("server", help="Manage ComfyUI server (start/stop/list)")
+    ServerCommand.configure(ps)
+    ps.set_defaults(_cmd=ServerCommand().run)
     # optional GUI subcommand (best-effort)
     try:
         from .gui_cmd import GuiCommand

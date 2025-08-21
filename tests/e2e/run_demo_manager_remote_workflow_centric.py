@@ -1,8 +1,10 @@
 # tests/e2e/run_demo_manager_remote_workflow_centric.py
 from __future__ import annotations
-from pathlib import Path
-import sys, time
+
 import random
+import sys
+import time
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SRC = REPO / "src"
@@ -15,6 +17,7 @@ from comfyui_remote.core.base.workflow import ExecutionContext
 
 WF = REPO / "tests" / "resources" / "workflows" / "txt2img.json"
 
+
 def main():
     # 1) Explicit, long output/input/user dirs
     base_runs = Path("../.comfy_outputs")
@@ -24,9 +27,9 @@ def main():
 
     srv = ComfyServerManager()
     handle = srv.start({
-        "input_dir":  str((base_runs/"in").resolve()),
-        "output_dir": str((base_runs/"out").resolve()),
-        "user_dir":   str((base_runs/"user").resolve()),
+        "input_dir": str((base_runs / "in").resolve()),
+        "output_dir": str((base_runs / "out").resolve()),
+        "user_dir": str((base_runs / "user").resolve()),
     })
     base = f"http://127.0.0.1:{handle.port}"
     print("[DEMO] Server:", base, "log:", handle.log_path)
@@ -34,10 +37,10 @@ def main():
     try:
         # 2) Manager workflow
         wm = WorkflowManager()  # uses default NodeRegistry/NodeCoreAPI/Loader/etc
-        wm.load(WF)             # robust loader (editor JSON)
+        wm.load(WF)  # robust loader (editor JSON)
         # Adjust the node by human-friendly title (added by loader into _meta.title)
         changed = wm.set_param_by_title("Main_prompt", "text",
-                    "A photoreal glass bottle in an ocean, pyramids inside, cinematic lighting, cinematic")
+                                        "A photoreal glass bottle in an ocean, pyramids inside, cinematic lighting, cinematic")
         print("[DEMO] Title patches:", changed)
 
         seed = random.randint(0, 2 ** 31 - 1)
@@ -65,13 +68,6 @@ def main():
         except Exception:
             pass
 
+
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-
-
-
-
-
-
