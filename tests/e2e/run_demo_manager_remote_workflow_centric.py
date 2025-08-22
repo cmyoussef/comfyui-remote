@@ -49,11 +49,11 @@ def main():
 
         # 3) Execute remotely against the server we just started
         wm.set_execution_context(ExecutionContext(mode="remote", base_url=base))
+        wm.save_prompt(base_runs / "prompt.json")
         result = wm.execute()
 
         print("[DEMO] STATE:", result.get("state"))
         print("[DEMO] ARTIFACTS:", result.get("artifacts"))
-        wm.save_prompt(base_runs / "prompt.json")
         # In remote mode, wm.execute() returns view URLs in artifacts (when available).
         # You can also use the connector directly to fetch bytes if you want to save a copy elsewhere.
 
@@ -63,6 +63,7 @@ def main():
         print("[DEMO] Done.")
         return 0
     finally:
+        # pass
         try:
             srv.stop()
         except Exception:

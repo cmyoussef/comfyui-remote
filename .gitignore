@@ -29,5 +29,5 @@ doc/sphinx/*.doc.zip
 doc/sphinx/build
 doc/sphinx/source/.doctrees/
 doc/sphinx/source/reference/api
-
+*.comfy_outputs
 

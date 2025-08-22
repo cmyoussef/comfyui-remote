@@ -125,13 +125,13 @@ class WorkflowManager:
     def get_compiled_prompt(self, ctx: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         return self._compiler.compile(self.graph, ctx or self._ctx)
 
-    def save_prompt(self, path) -> None:
-        """Persist the *compiled* prompt payload to JSON for inspection/reuse."""
-        import json
-        payload = self.get_compiled_prompt()
-        p = str(path)
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+    def save_prompt(self, path: str | Path, ctx: Optional[ExecutionContext] = None) -> None:
+        """Serialize the compiled prompt. If you want schema‑driven expansion,
+        pass a ctx with base_url or call set_execution_context(...) first."""
+        payload = self._compiler.compile(self.graph, ctx or self._ctx)
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # ---------- Indexing from file ----------
     def _build_index_from_file(self, path: str) -> None:
@@ -311,36 +311,27 @@ class WorkflowManager:
                 hits += 1
         return hits
 
-    def set_param_by_title(self,
-                           title: str,
-                           name: str,
-                           value: Any,
-                           match: str = "exact",
-                           limit: Optional[int] = None) -> int:
-        nodes = self._find_nodes_by_title(title, match=match)
+    def set_param_by_title(self, title: str, param: str, value: Any, limit: Optional[int] = None) -> int:
         hits = 0
-        for n in nodes:
-            if name in n.params():
-                n.set_param(name, value)
+        for n in self.graph.iter_nodes():
+            t = getattr(n, "_wm_title", None) or getattr(getattr(n, "meta", None), "label", None)
+            if t == title:
+                n.set_param(param, value)
                 hits += 1
                 if limit and hits >= limit:
                     break
         return hits
 
-    def set_param_by_type(self, class_type: str, params: Dict[str, Any], limit: Optional[int] = None) -> int:
-        nodes = self._find_nodes_by_type(class_type)
+    def set_param_by_type(self, class_type: str, updates: Dict[str, Any], limit: Optional[int] = None) -> int:
         hits = 0
-        for n in nodes:
-            changed = False
-            np = n.params()
-            for k, v in params.items():
-                if k in np:
+        for n in self.graph.iter_nodes():
+            ctype = getattr(n, "_wm_class_type", None) or getattr(getattr(n, "meta", None), "type", None)
+            if ctype == class_type:
+                for k, v in updates.items():
                     n.set_param(k, v)
-                    changed = True
-            if changed:
-                hits += 1
-                if limit and hits >= limit:
-                    break
+                    hits += 1
+                    if limit and hits >= limit:
+                        return hits
         return hits
 
     # ---------- Structured overrides ----------

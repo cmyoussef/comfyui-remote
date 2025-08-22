@@ -6,6 +6,7 @@ import os
 import socket
 import time
 import uuid
+import requests
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Iterable
@@ -18,6 +19,7 @@ def _now_iso() -> str:
 
 class _FileMutex:
     """Cross-platform best-effort lock based on an atomic .lock file."""
+
     def __init__(self, lock_path: Path, poll_interval: float = 0.05) -> None:
         self._lock_path = str(lock_path)
         self._fd: Optional[int] = None
@@ -46,9 +48,9 @@ class _FileMutex:
 @dataclass
 class ServerRecord:
     id: str
-    state: str                 # "running" | "stopped"
-    base_url: str              # e.g. http://HOST:PORT
-    host: str                  # listen host
+    state: str  # "running" | "stopped"
+    base_url: str  # e.g. http://HOST:PORT
+    host: str  # listen host
     port: int
     pid: int
     started_at: str
@@ -56,7 +58,7 @@ class ServerRecord:
     owner_user: str = ""
     owner_host: str = ""
     log_path: str = ""
-    tags: List[str] = None     # e.g. ["farm"] or ["local"]
+    tags: List[str] = None  # e.g. ["farm"] or ["local"]
     meta: Dict[str, Any] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -71,7 +73,9 @@ class ServerRegistry:
     """
     Append-only JSONL registry (one JSON per line) with a simple lockfile.
     Use a network/shared path (via COMFY_REGISTRY) to make it visible to other hosts.
+    Now includes validation to detect crashed/killed servers.
     """
+
     def __init__(self, path: Optional[str] = None) -> None:
         env_path = os.getenv("COMFY_REGISTRY", "")
         base = Path(path or env_path or (Path.home() / ".comfyui-remote" / "servers.jsonl"))
@@ -172,3 +176,112 @@ class ServerRegistry:
             if r.id == key or r.base_url == norm_key:
                 return r
         return None
+
+    # ------------ NEW: Validation methods ------------
+    def validate_server(self, server: ServerRecord, timeout: float = 1.0) -> bool:
+        """
+        Validate if a server is actually running by:
+        1. Checking if it's on the local machine and the PID exists
+        2. Attempting to connect to its /object_info endpoint
+
+        Returns True if server is reachable, False otherwise.
+        """
+        # First check: Is this a local server?
+        local_hosts = {"localhost", "127.0.0.1", socket.gethostname()}
+        try:
+            local_hosts.add(socket.gethostbyname(socket.gethostname()))
+        except Exception:
+            pass
+
+        is_local = server.host in local_hosts
+
+        # For local servers, check if PID exists
+        if is_local and server.pid:
+            if not self._is_pid_running(server.pid):
+                return False
+
+        # Second check: Try to reach the server's API
+        try:
+            response = requests.get(
+                f"{server.base_url}/object_info",
+                timeout=timeout
+            )
+            return response.ok
+        except Exception:
+            return False
+
+    def _is_pid_running(self, pid: int) -> bool:
+        """Check if a PID is running on the local system"""
+        if os.name == 'nt':
+            # Windows
+            try:
+                import psutil
+                return psutil.pid_exists(pid)
+            except ImportError:
+                # Fallback for Windows without psutil
+                import subprocess
+                try:
+                    result = subprocess.run(
+                        ['tasklist', '/FI', f'PID eq {pid}'],
+                        capture_output=True,
+                        text=True,
+                        check=False
+                    )
+                    return str(pid) in result.stdout
+                except Exception:
+                    return True  # Assume running if we can't check
+        else:
+            # Unix/Linux/Mac
+            try:
+                os.kill(pid, 0)
+                return True
+            except OSError:
+                return False
+            except Exception:
+                return True  # Assume running if we can't check
+
+    def validate_and_update(self, timeout: float = 1.0) -> int:
+        """
+        Validate all 'running' servers and update their state if they're not reachable.
+        Returns the number of servers that were marked as stopped.
+        """
+        servers = self.list_latest()
+        stopped_count = 0
+
+        for server in servers:
+            if server.state != "running":
+                continue
+
+            # Validate the server
+            if not self.validate_server(server, timeout=timeout):
+                # Server is not reachable, mark it as stopped
+                self.register_stop(server.id)
+                stopped_count += 1
+                print(f"[Registry] Server {server.id[:8]} ({server.base_url}) is not reachable, marking as stopped")
+
+        return stopped_count
+
+    def validate_specific(self, server_id: str, timeout: float = 1.0) -> bool:
+        """
+        Validate a specific server and update its state if needed.
+        Returns True if the server is running, False if it was marked as stopped.
+        """
+        server = None
+        for s in self.list_latest():
+            if s.id == server_id:
+                server = s
+                break
+
+        if not server:
+            return False
+
+        if server.state != "running":
+            return False
+
+        is_valid = self.validate_server(server, timeout=timeout)
+
+        if not is_valid:
+            self.register_stop(server_id)
+            print(f"[Registry] Server {server_id[:8]} is not reachable, marking as stopped")
+
+        return is_valid

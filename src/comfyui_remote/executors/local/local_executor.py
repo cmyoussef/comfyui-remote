@@ -31,12 +31,22 @@ class LocalExecutor(ExecutorBase):
 
     def submit(self, graph, ctx: ExecutionContext) -> str:
         compiler = ComfyCompiler()
+
+        base = f"http://127.0.0.1:{self._handle.port}"
+        if not getattr(ctx, "base_url", None):
+            # mutate a copy if your ExecutionContext is immutable; else set directly
+            try:
+                ctx.base_url = base  # ok if it's a simple object
+            except Exception:
+                pass
+
         payload = compiler.compile(graph, ctx)
+
         if os.getenv("COMFY_DEBUG"):
             print("[local-exec] compiled payload:", payload)
 
         if self._connector is None:  # safety
-            base = f"http://127.0.0.1:{self._handle.port}"
+
             self._connector = ComfyConnector(base_url=base)
 
         client_id = f"local-{uuid.uuid4().hex[:8]}"
