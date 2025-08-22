@@ -302,21 +302,25 @@ class WorkflowManager:
         return out
 
     # ---------- Precise patching ----------
-    def set_param_by_id(self, ext_id: str | int, name: str, value: Any) -> int:
-        nodes = self._find_nodes_by_id(ext_id)
+    def set_param_by_title(self, title: str, name: str, value: Any, limit: Optional[int] = None) -> int:
         hits = 0
-        for n in nodes:
-            if name in n.params():
+        t_norm = (title or "").strip().lower()
+        for n in self.graph.iter_nodes():
+            nt = (n.title or "").strip().lower()
+            if nt == t_norm:
                 n.set_param(name, value)
                 hits += 1
+                if limit and hits >= limit:
+                    break
         return hits
 
-    def set_param_by_title(self, title: str, param: str, value: Any, limit: Optional[int] = None) -> int:
+    def set_param_by_type(self, ctype: str, values: Dict[str, Any], limit: Optional[int] = None) -> int:
         hits = 0
+        c_norm = (ctype or "").strip()
         for n in self.graph.iter_nodes():
-            t = getattr(n, "_wm_title", None) or getattr(getattr(n, "meta", None), "label", None)
-            if t == title:
-                n.set_param(param, value)
+            if n.ctype == c_norm:
+                for k, v in values.items():
+                    n.set_param(k, v)
                 hits += 1
                 if limit and hits >= limit:
                     break
