@@ -8,8 +8,8 @@ from comfyui_remote.connectors.comfy.rest_client import ComfyRestClient
 
 class TestStep01Server(unittest.TestCase):
     def test_start_healthcheck_stop(self):
-        ensure_env(self, "COMFYUI_HOME", "Set to your ComfyUI folder (contains main.py).")
         mgr = ComfyServerManager()
+        ensure_env(self, "COMFYUI_HOME", "Set to your ComfyUI folder (contains main.py).")
         handle = mgr.start({})
         try:
             base = f"http://127.0.0.1:{handle.port}"

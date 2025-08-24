@@ -1,0 +1,13 @@
+{
+  "server": {
+    "disable_cuda_malloc": true,
+    "dont_print_server": false
+  },
+  "paths": {
+    "home": "${ENV:COMFYUI_HOME}",
+    "custom_nodes": []
+  },
+  "env": {
+    "TOKENIZERS_PARALLELISM": "false"
+  }
+}

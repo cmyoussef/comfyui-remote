@@ -34,22 +34,25 @@ class NodeBase:
         self.meta = meta
         self._uid: str = uuid.uuid4().hex
         self._id: Optional[str] = str(node_id) if node_id is not None else None
-
         self._ctype: str = meta.type or "Unknown"
-        self._title: Optional[str] = meta.title or (meta.label or None)
 
-        # Explicit runtime overrides ONLY
+        # Title: keep ONLY explicit editor/prompt title here
+        t = meta.title
+        if isinstance(t, str):
+            t = t.strip()
+        self._title: Optional[str] = t if t else None
+
         self._params: Dict[str, Any] = {}
-
-        # Connections set by loader/graph.connect()
         self._raw_inputs: Dict[str, Any] = {}
-
-        # UI-related fields used by the compiler
         self._widgets_values: List[Any] = []
         self._connector_inputs: List[str] = []
         self._out_slot_map: Dict[str, int] = {}
 
     # ---------- Identity ----------
+    @property
+    def label(self) -> str:
+        """Human label (Node name for S&R or type if missing)."""
+        return getattr(self.meta, "label", "") or self.ctype
 
     @property
     def uid(self) -> str:
@@ -105,20 +108,18 @@ class NodeBase:
 
     @property
     def title(self) -> Optional[str]:
+        # Prefer explicit title
         if self._title:
             return self._title
-        # Back-compat shim from legacy raw spec
-        wm_raw = getattr(self, "_wm_raw_spec", None)
-        if isinstance(wm_raw, dict):
-            meta = wm_raw.get("_meta", {})
-            if isinstance(meta, dict):
-                t = meta.get("title")
-                if t:
-                    return str(t)
+        # Precise binding added by WorkflowManager after load
+        t = getattr(self, "_wm_title", None)
+        if isinstance(t, str) and t.strip():
+            return t
+        # Do NOT fall back to _wm_raw_spec to avoid recursion; legacy fallback removed.
         return None
 
     def set_title(self, title: Optional[str]) -> None:
-        self._title = str(title) if title else None
+        self._title = str(title).strip() if title else None
 
     # ---------- Params (runtime overrides only) ----------
 
@@ -203,13 +204,20 @@ class NodeBase:
 
     @property
     def _wm_raw_spec(self) -> Dict[str, Any]:
-        """Return a normalized spec for old code expecting _wm_raw_spec."""
+        """
+        Legacy normalized spec for old code. IMPORTANT: must not call self.title,
+        otherwise it can recurse (title used to fall back to _wm_raw_spec).
+        """
         spec: Dict[str, Any] = {
             "class_type": self.ctype,
             "inputs": dict(self.raw_inputs),
         }
-        if self.title:
-            spec["_meta"] = {"title": self.title}
+        # Pull from internal fields only; no property access here.
+        t = self._title
+        if not t:
+            t = getattr(self, "_wm_title", None)
+        if isinstance(t, str) and t.strip():
+            spec["_meta"] = {"title": t}
         return spec
 
     def __repr__(self) -> str:

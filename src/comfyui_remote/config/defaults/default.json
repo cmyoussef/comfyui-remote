@@ -1,0 +1,26 @@
+{
+  "layers": [
+    { "name": "base",    "path": "${PKG}/config/defaults/default" },
+    { "name": "os",      "path": "${PKG}/config/defaults/${OS}" },
+    { "name": "site",    "path": "${PKG}/config/defaults/dneg" },
+    { "name": "project", "path": "${ENV:SHOW_ROOT}/${ENV:SHOW}/comfy_remote_config" },
+    { "name": "user",    "path": "${HOME}/.comfy-remote/comfy_remote_config" },
+    { "name": "cli",     "path": null }
+  ],
+  "yaml_layers": [
+    { "name": "base",    "path": "${PKG}/config/defaults/comfyui_default" },
+    { "name": "os",      "path": "${PKG}/config/defaults/comfyui_${OS}" },
+    { "name": "site",    "path": "${PKG}/config/defaults/comfyui_dneg" },
+    { "name": "project", "path": "${ENV:SHOW_ROOT}/${ENV:SHOW}/comfyui_config" },
+    { "name": "user",    "path": "${HOME}/.comfy-remote/comfyui_config" },
+    { "name": "cli",     "path": null }
+  ],
+  "server_management": {
+    "registry_path": "${HOME}/.comfy-remote/servers.jsonl",
+    "auto_start": true
+  },
+  "execution": {
+    "default_mode": "local",
+    "timeout_seconds": 300
+  }
+}

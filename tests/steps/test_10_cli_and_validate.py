@@ -54,7 +54,7 @@ class TestStep10CLI(unittest.TestCase):
             sys.argv = old
 
     def test_run_local_best_effort(self):
-        ensure_env(self, "COMFYUI_HOME", "Set to your ComfyUI folder (contains main.py).")
+        # ensure_env(self, "COMFYUI_HOME", "Set to your ComfyUI folder (contains main.py).")
         from comfyui_remote.cli.main import main
 
         # Write a minimal *prompt JSON*

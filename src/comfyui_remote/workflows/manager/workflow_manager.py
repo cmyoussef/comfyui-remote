@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import warnings  # <-- add
 from pathlib import Path
 from typing import Dict, Any, Optional, Iterable, List, Tuple
 
 from ...config.manager import ConfigManager
 from ...connectors.comfy.connector import ComfyConnector
+# REMOVE these two heavy imports (we no longer launch here)
+# from ...connectors.comfy.rest_client import ComfyRestClient
+# from ...connectors.comfy.server_manager import ComfyServerManager
+from ...connectors.comfy.schema_resolver import SchemaResolverRegistry, is_primitive_tag  # <-- add is_primitive_tag
 from ...core.base.workflow import ExecutionContext
 from ...executors.executor_factory import ExecutorFactory
 from ...handlers.output.output_handler import OutputHandler
@@ -16,6 +22,26 @@ from ...services.progress_service import ProgressService
 from ...services.validation_service import ValidationService
 from ...workflows.compiler.comfy_compiler import ComfyCompiler
 from ...workflows.loader.workflow_loader import WorkflowLoader
+
+
+def _is_primitive_value(v: Any) -> bool:
+    return isinstance(v, (str, int, float, bool)) or v is None
+
+
+def _compatible(val: Any, tag: Optional[str]) -> bool:
+    """Type compatibility aligned with compiler mapping."""
+    if tag is None:  # treat as STRING (e.g., choices)
+        return isinstance(val, str)
+    t = tag.upper()
+    if t == "INT":
+        return isinstance(val, int)
+    if t == "FLOAT":
+        return isinstance(val, (int, float))
+    if t in ("STRING",):
+        return isinstance(val, str)
+    if t in ("BOOL", "BOOLEAN"):
+        return isinstance(val, bool)
+    return False
 
 
 class WMProgressObserver:
@@ -84,6 +110,50 @@ class WorkflowManager:
         self._bind_ext_to_node: Dict[str, Any] = {}
         self._bind_node_to_ext: Dict[int, str] = {}
 
+        auto_materialize_params = str(os.getenv("COMFY_MATERIALIZE_PARAMS", "true")).lower() in ("1", "true", "yes",
+                                                                                                 "on")
+
+        self.auto_materialize_params = auto_materialize_params
+
+    def materialize_params(self, overwrite: bool = False) -> int:
+        """
+        Populate NodeBase.params() with schema-derived primitive inputs so that
+        iterating nodes shows meaningful params (steps, cfg, text, etc.).
+
+        - Uses ComfyCompiler (single source of truth).
+        - Skips connection values [src_id, slot].
+        - overwrite=False keeps any runtime overrides you've already set.
+
+        Returns the number of (node,param) assignments.
+        """
+        # Ensure a resolver key (http | file: | inline:)
+        key = getattr(self._ctx, "base_url", None)
+        if not key:
+            try:
+                key = SchemaResolverRegistry.ensure()
+                self._ctx.base_url = key
+            except Exception:
+                return 0
+
+        payload = self._compiler.compile(self.graph, self._ctx)
+        hits = 0
+        for node_id, spec in payload.items():
+            ins = spec.get("inputs") or {}
+            try:
+                node = self.graph.get_node(node_id)
+            except Exception:
+                continue
+
+            for pname, pval in ins.items():
+                # Skip connections of the form [id, slot]
+                if isinstance(pval, list) and len(pval) == 2 and all(isinstance(x, (str, int)) for x in pval):
+                    continue
+                if (not overwrite) and node.has_param(pname):
+                    continue
+                node.set_param(pname, pval)
+                hits += 1
+        return hits
+
     # ---------- Properties ----------
     @property
     def graph(self):
@@ -106,32 +176,225 @@ class WorkflowManager:
         self._ctx = ctx
 
     def load(self, editor_or_prompt_json_path: str) -> int:
-        """
-        Load editor JSON or compiled prompt JSON, build the file index,
-        and bind ext_ids to the actual NodeBase instances by file order.
-        """
-        # Load into the live graph
+        # Load + index + bind as you had
         WorkflowLoader(self._api).load_from_json(editor_or_prompt_json_path)
         self._loaded_path = str(editor_or_prompt_json_path)
-
-        # Build a precise index from the file
         self._build_index_from_file(self._loaded_path)
-
-        # Bind live nodes by file order
         self._bind_nodes_to_file_order()
 
-        return sum(1 for _ in self.graph.iter_nodes())
+        count = sum(1 for _ in self.graph.iter_nodes())
 
-    def get_compiled_prompt(self, ctx: Optional[ExecutionContext] = None) -> Dict[str, Any]:
-        return self._compiler.compile(self.graph, ctx or self._ctx)
+        # Optional: auto-materialize (default ON) so params() is immediately useful
+        if self.auto_materialize_params:
+            try:
+                if not getattr(self._ctx, "base_url", None):
+                    self._ctx.base_url = SchemaResolverRegistry.ensure()
+                self.materialize_params(overwrite=False)
+            except Exception:
+                # keep non-fatal; you can guard with COMFY_DEBUG to raise
+                pass
 
-    def save_prompt(self, path: str | Path, ctx: Optional[ExecutionContext] = None) -> None:
-        """Serialize the compiled prompt. If you want schema‑driven expansion,
-        pass a ctx with base_url or call set_execution_context(...) first."""
+        return count
+
+    def ensure_schema(self, base_url: Optional[str] = None) -> Optional[str]:
+        """
+        Ensure a resolver key is available for compiler/saver:
+          - honors COMFY_SCHEMA_JSON / COMFY_REMOTE_URL
+          - else tries the on-disk cache
+          - else launches ephemeral (handled by SchemaResolverRegistry)
+        """
+        try:
+            key = SchemaResolverRegistry.ensure(base_url=base_url or None)
+            self._schema_key = key
+            self._ctx.base_url = key
+            return key
+        except Exception:
+            return None
+
+    def export_prompt(self,
+                      path: Optional[str] = None,
+                      ctx: Optional[ExecutionContext] = None,
+                      pretty: bool = True) -> Dict[str, Any]:
+        """
+        Compile and optionally write the /prompt payload.
+        - No mutation of the workflow JSON — this is the exact dict you posted.
+        """
         payload = self._compiler.compile(self.graph, ctx or self._ctx)
-        p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        if path:
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            txt = json.dumps(payload, indent=2 if pretty else None, ensure_ascii=False)
+            p.write_text(txt, encoding="utf-8")
+        return payload
+
+    def save_editor_json(self,
+                         out_path: Optional[str] = None,
+                         *,
+                         allow_clear_titles: bool = False,
+                         materialize_params: Optional[bool] = None,
+                         pretty: bool = True) -> Dict[str, Any]:
+        """
+        Persist the *editor JSON* with live titles and (optionally) materialized
+        primitive param overrides into widgets_values.
+
+        - If `out_path` is None, returns the patched JSON dict without writing.
+        - Only updates what's different (titles / affected widget indices).
+        - `materialize_params` defaults to self.auto_materialize_params.
+        """
+        if not self._loaded_path:
+            raise RuntimeError("No workflow loaded; call load(path) first.")
+
+        materialize = self.auto_materialize_params if materialize_params is None else bool(materialize_params)
+
+        try:
+            data = json.loads(Path(self._loaded_path).read_text(encoding="utf-8"))
+        except Exception as e:
+            raise RuntimeError(f"Failed to read editor JSON {self._loaded_path}: {e}") from e
+
+        # Only editor JSON is supported for write-back
+        if not (isinstance(data, dict) and "nodes" in data and isinstance(data["nodes"], list)):
+            warnings.warn("Loaded workflow was not an editor JSON; skipping write-back.", RuntimeWarning)
+            return data
+
+        # Resolve schema (best-effort) — if unavailable, we still save titles
+        resolver = None
+        if materialize:
+            try:
+                key = getattr(self._ctx, "base_url", None) or SchemaResolverRegistry.ensure()
+                resolver = SchemaResolverRegistry.get(key)
+            except Exception:
+                resolver = None
+                materialize = False
+                warnings.warn(
+                    "Schema not available; will save titles only (param materialization skipped).",
+                    RuntimeWarning
+                )
+
+        # Live node lookup by ext_id
+        live_by_id: Dict[str, Any] = dict(self._bind_ext_to_node)
+
+        for nd in data["nodes"]:
+            if not isinstance(nd, dict):
+                continue
+
+            ext_id = _normalize_ext_id(nd.get("id"))
+            nb = live_by_id.get(ext_id)
+            if nb is None:
+                continue
+
+            # ---- Titles (update only when different) ----
+            old_title = nd.get("title")
+            new_title = nb.title
+            if new_title is not None:
+                if old_title != new_title:
+                    nd["title"] = new_title
+            else:
+                if allow_clear_titles and "title" in nd:
+                    del nd["title"]
+
+            # ---- Param → widgets_values (schema-aware, minimal) ----
+            if not materialize:
+                continue
+
+            widgets = list(nd.get("widgets_values", []))
+            if not widgets:
+                continue
+
+            # Resolve arg specs
+            arg_specs = []
+            try:
+                if resolver:
+                    arg_specs = resolver.get_arg_specs(nb.ctype)
+            except Exception:
+                arg_specs = []
+
+            if not arg_specs:
+                continue
+
+            assignable = [(nm, ty) for (nm, ty, _meta) in arg_specs if is_primitive_tag(ty)]
+            base_inputs: Dict[str, Any] = dict(getattr(nb, "raw_inputs", {}) or {})
+
+            # Rebuild name->index by replaying sliding alignment on ORIGINAL widgets
+            name_to_index: Dict[str, int] = {}
+            j = 0
+            N = len(widgets)
+            for name, ty in assignable:
+                if name in base_inputs:
+                    # connected input: UI often hides a widget; we don't force it
+                    continue
+                while j < N:
+                    tok = widgets[j]
+                    j += 1
+                    if _compatible(tok, ty):
+                        name_to_index[name] = j - 1
+                        break
+
+            overrides = nb.params() or {}
+            if not overrides:
+                continue
+
+            new_widgets = list(widgets)
+            changed = False
+
+            for pname, pval in overrides.items():
+                if not _is_primitive_value(pval):
+                    continue
+                idx = name_to_index.get(pname)
+                if idx is None or not (0 <= idx < len(new_widgets)):
+                    continue
+                if new_widgets[idx] != pval:
+                    new_widgets[idx] = pval
+                    changed = True
+
+            if changed:
+                nd["widgets_values"] = new_widgets
+
+        if out_path:
+            p = Path(out_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(data, indent=2 if pretty else None, ensure_ascii=False), encoding="utf-8")
+
+        return data
+
+    def record_run(self,
+                   out_dir: str,
+                   *,
+                   include_compiled: bool = True,
+                   include_editor: bool = True,
+                   pretty: bool = True) -> Dict[str, str]:
+        """
+        Save reproducibility artifacts for debugging under `out_dir`:
+          - compiled.prompt.json (exact payload)
+          - editor.patched.json  (UI-friendly, titles/params reflected)
+          - manifest.json        (context snippet)
+        Returns a dict of written paths (only those created).
+        """
+        out: Dict[str, str] = {}
+        d = Path(out_dir)
+        d.mkdir(parents=True, exist_ok=True)
+
+        if include_compiled:
+            path = str(d / "compiled.prompt.json")
+            self.export_prompt(path, pretty=pretty)
+            out["compiled"] = path
+
+        if include_editor:
+            path = str(d / "editor.patched.json")
+            self.save_editor_json(path, pretty=pretty)
+            out["editor"] = path
+
+        manifest = {
+            "loaded_path": self._loaded_path,
+            "base_url_or_key": getattr(self._ctx, "base_url", None),
+            "last_handle_id": self._last_handle_id,
+            "node_count": len(self),
+        }
+        man_path = str(d / "manifest.json")
+        Path(man_path).write_text(json.dumps(manifest, indent=2 if pretty else None, ensure_ascii=False),
+                                  encoding="utf-8")
+        out["manifest"] = man_path
+
+        return out
 
     # ---------- Indexing from file ----------
     def _build_index_from_file(self, path: str) -> None:
@@ -326,17 +589,13 @@ class WorkflowManager:
                     break
         return hits
 
-    def set_param_by_type(self, class_type: str, updates: Dict[str, Any], limit: Optional[int] = None) -> int:
-        hits = 0
-        for n in self.graph.iter_nodes():
-            ctype = getattr(n, "_wm_class_type", None) or getattr(getattr(n, "meta", None), "type", None)
-            if ctype == class_type:
-                for k, v in updates.items():
-                    n.set_param(k, v)
-                    hits += 1
-                    if limit and hits >= limit:
-                        return hits
-        return hits
+    def set_param_by_id(self, ext_id: str | int, name: str, value: Any) -> int:
+        ext = _normalize_ext_id(ext_id)
+        n = self._bind_ext_to_node.get(ext)
+        if n is None:
+            return 0
+        n.set_param(name, value)
+        return 1
 
     # ---------- Structured overrides ----------
     def apply_overrides(self, spec: Dict[str, Any]) -> int:
@@ -365,7 +624,7 @@ class WorkflowManager:
             for title, updates in by_title.items():
                 if isinstance(updates, dict):
                     for pname, pval in updates.items():
-                        total += self.set_param_by_title(title, pname, pval, match="exact")
+                        total += self.set_param_by_title(title, pname, pval)
 
         by_type = spec.get("by_type") or {}
         if isinstance(by_type, dict):
@@ -485,3 +744,35 @@ class WorkflowManager:
             ext = rec["ext_id"]
             n = self._bind_ext_to_node.get(ext)
             print(f"  id={ext:>3}  type={rec['class_type']:<22}  title={rec['title']!r}  bound={'Y' if n else 'N'}")
+
+    # -------- Python container protocol (delegate to Graph) --------
+    def __iter__(self):
+        yield from self.graph.iter_nodes()
+
+    def __len__(self):
+        return sum(1 for _ in self.graph.iter_nodes())
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.graph.iter_nodes())[key]
+        # treat as ext_id
+        ext = _normalize_ext_id(str(key))
+        n = self._bind_ext_to_node.get(ext)
+        if n is None:
+            raise KeyError(key)
+        return n
+
+    def __contains__(self, key) -> bool:
+        from ...nodes.base.node_base import NodeBase
+        if isinstance(key, NodeBase):
+            return id(key) in self._bind_node_to_ext
+        return _normalize_ext_id(str(key)) in self._bind_ext_to_node
+
+    def __bool__(self) -> bool:
+        return len(self) > 0
+
+    def __str__(self) -> str:
+        return f"<WorkflowManager {self._loaded_path}, nodes={len(self)}, ctx={self._ctx!r}>"
+
+    def __repr__(self) -> str:
+        return str(self)

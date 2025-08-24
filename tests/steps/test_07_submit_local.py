@@ -24,7 +24,7 @@ def _write_min_prompt_json(path: Path):
 
 class TestStep07SubmitLocal(unittest.TestCase):
     def test_submit(self):
-        ensure_env(self, "COMFYUI_HOME", "Set to your ComfyUI folder (contains main.py).")
+        # ensure_env(self, "COMFYUI_HOME", "Set to your ComfyUI folder (contains main.py).")
 
         # Prepare IO dirs and resource image
         tmp_in = Path(tempfile.mkdtemp(prefix="comfy_in_"))

@@ -1,0 +1,19 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 0,
+    "disable_cuda_malloc": false,
+    "dont_print_server": false,
+    "extra_args": []
+  },
+  "paths": {
+    "home": "${ENV:COMFYUI_HOME}",
+    "models_root": "",
+    "models": {},
+    "custom_nodes": []
+  },
+  "env": {
+    "HF_HUB_DISABLE_TELEMETRY": "1",
+    "DO_NOT_TRACK": "1"
+  }
+}

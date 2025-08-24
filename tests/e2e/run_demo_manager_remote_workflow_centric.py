@@ -49,7 +49,7 @@ def main():
 
         # 3) Execute remotely against the server we just started
         wm.set_execution_context(ExecutionContext(mode="remote", base_url=base))
-        wm.save_prompt(base_runs / "prompt.json")
+        wm.record_run(base_runs.as_posix())
         result = wm.execute()
 
         print("[DEMO] STATE:", result.get("state"))

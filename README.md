@@ -247,7 +247,7 @@ wm.set_param_by_id("6", {"text": "New prompt"})
 ### Compile and inspect the payload
 
 ```python
-payload = wm.get_compiled_prompt()
+payload = wm.export_prompt()
 wm.save_prompt(".comfy_outputs/prompt.json")
 ```
 

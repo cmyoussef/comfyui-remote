@@ -14,6 +14,7 @@ class TestStep04LoadWorkflow(unittest.TestCase):
         api = NodeCoreAPI(NodeRegistry())
         WorkflowLoader(api).load_from_json(str(RES / "txt2img.json"))
         nodes = list(api.graph_ref().iter_nodes())
+        print(nodes)
         self.assertGreater(len(nodes), 0)
 
 if __name__ == "__main__":

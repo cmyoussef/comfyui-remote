@@ -17,7 +17,7 @@ def _write_min_prompt_json(path: Path):
 
 class TestStep09WorkflowManagerLocal(unittest.TestCase):
     def test_end_to_end(self):
-        ensure_env(self, "COMFYUI_HOME", "Set to your ComfyUI folder (contains main.py).")
+        # ensure_env(self, "COMFYUI_HOME", "Set to your ComfyUI folder (contains main.py).")
 
         # IO dirs & resource
         tmp_in = Path(tempfile.mkdtemp(prefix="comfy_in_"))

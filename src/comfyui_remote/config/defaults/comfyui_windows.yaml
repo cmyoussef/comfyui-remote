@@ -1,0 +1,29 @@
+# Windows baseline configuration for ComfyUI Remote (YAML layer)
+
+server:
+  host: 127.0.0.1
+  port: 0
+  disable_cuda_malloc: false
+  dont_print_server: false
+  extra_args: []
+
+io:
+  input_dir: ""
+  output_dir: ""
+  temp_dir: ""
+  user_dir: ""
+
+paths:
+  home: "${ENV:COMFYUI_HOME"
+
+  # Example: if you keep everything under E:\comfyui\comfyui
+  models_root: "E:/comfyui/comfyui"
+
+  models: {}
+  custom_nodes:
+    - "E:/comfyui/comfyui/custom_nodes"
+    - "${ENV:LOCALAPPDATA}/Programs/@comfyorgcomfyui-electron/resources/ComfyUI/custom_nodes"
+
+env:
+  HF_HUB_DISABLE_TELEMETRY: "1"
+  DO_NOT_TRACK: "1"

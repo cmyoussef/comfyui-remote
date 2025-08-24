@@ -16,7 +16,6 @@ class _Obs:
 
 class TestStep03PostPrompt(unittest.TestCase):
     def test_post_minimal_io(self):
-        ensure_env(self, "COMFYUI_HOME", "Set to the folder containing ComfyUI/main.py")
 
         # temp IO roots and copy a tiny resource image into input dir
         tmp_in = Path(tempfile.mkdtemp(prefix="comfy_in_"))
@@ -27,6 +26,7 @@ class TestStep03PostPrompt(unittest.TestCase):
         shutil.copy2(RES_IMG, tmp_img)
 
         mgr = ComfyServerManager()
+        ensure_env(self, "COMFYUI_HOME", "Set to the folder containing ComfyUI/main.py")
         handle = mgr.start({"input_dir": str(tmp_in), "output_dir": str(tmp_out)})
 
         base = f"http://127.0.0.1:{handle.port}"

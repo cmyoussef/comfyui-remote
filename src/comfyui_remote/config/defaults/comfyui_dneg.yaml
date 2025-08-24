@@ -1,0 +1,25 @@
+# Site (DNEG) overrides for ComfyUI Remote (YAML layer)
+
+server:
+  disable_cuda_malloc: true
+  dont_print_server: false
+
+io:
+  input_dir: "/user_data/comfyui/input"
+  output_dir: "/user_data/comfyui/output"
+  temp_dir: "/user_data/comfyui/temp"
+  user_dir: "/user_data/comfyui/user"
+
+paths:
+  home: "${ENV:COMFYUI_HOME}"
+  models_root: "/jobs/models"
+  models:
+    checkpoints:
+      - "/jobs/models/checkpoints"
+    loras:
+      - "/jobs/models/loras"
+  custom_nodes:
+    - "/tools/comfy/custom_nodes"
+
+env:
+  TOKENIZERS_PARALLELISM: "false"
