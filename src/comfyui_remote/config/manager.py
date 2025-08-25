@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+# NOTE: For now we keep layering helpers as-is (no logic change).
 from .layering import (
     load_controller,
     resolve_layer_path,
@@ -18,16 +19,14 @@ from .layering import (
 )
 from .types import ComfyConfig
 
+
 # ----------------------- path & misc helpers -----------------------
 
 _ENV_TOKEN_RE = re.compile(r"\$\{ENV:([A-Za-z0-9_]+)\}")
 
 
 def _pick(k: str, *vals: str) -> Optional[str]:
-    """
-    Return the first non-empty value among vals, else None.
-    Convenience for 'prefer config, else computed'.
-    """
+    """Return the first non-empty value among vals, else None."""
     for v in vals:
         if v:
             return v
@@ -53,10 +52,10 @@ def _expand_env_token_style(text: str, env: Optional[Dict[str, str]] = None) -> 
 
 def _expand_all_tokens(text: str, env: Optional[Dict[str, str]] = None) -> str:
     """
-    For DEBUG views ONLY:
-      - Expand ${ENV:VAR} (our style)
-      - Expand $VAR / ${VAR} (shell style)
-      - Expand ~ (home)
+    Expand:
+      - ${ENV:VAR} (manager token style)
+      - $VAR / ${VAR} (shell style)
+      - ~ (home)
     """
     if not isinstance(text, str):
         return text
@@ -67,7 +66,7 @@ def _expand_all_tokens(text: str, env: Optional[Dict[str, str]] = None) -> str:
 
 
 def _deep_expand_debug(obj: Any, env: Optional[Dict[str, str]] = None) -> Any:
-    """Recursively expand strings in dict/list/scalars for debug printing."""
+    """Recursively expand strings for debug printing only."""
     if isinstance(obj, str):
         return _expand_all_tokens(obj, env)
     if isinstance(obj, list):
@@ -87,7 +86,7 @@ def _expand_vars(path: str) -> str:
 
 
 def _norm_path(path: str) -> str:
-    """Normalize a path and prefer forward slashes (Comfy tolerates both on Windows)."""
+    """Normalize a path and prefer forward slashes."""
     if not path:
         return path
     return str(Path(_expand_vars(path))).replace("\\", "/")
@@ -194,9 +193,7 @@ def _render_extra_yaml(models_map: Dict[str, List[str]], custom_nodes: List[str]
 # ----------------------- runtime wrapper -----------------------
 
 class RuntimeConfig:
-    """
-    Output of ConfigManager.build_runtime().
-    """
+    """Output of ConfigManager.build_runtime()."""
 
     def __init__(self, argv: List[str], env: Dict[str, str], extra_paths_file: Optional[str]):
         self.argv = argv
@@ -210,23 +207,13 @@ class ConfigManager:
     """
     Controller-aware configuration loader & builder.
 
-    - If COMFY_CONFIG points to a *controller* (has "layers"/"yaml_layers"):
+    - If a controller (default.json) is used:
         * merges the Remote JSON stack  → ComfyConfig (server/paths/env)
-        * merges the Comfy YAML stack  → mapped into ComfyConfig (io/paths) and
-          retained for debug via `debug_comfy_yaml_text()`
+        * merges the Comfy YAML stack  → mapped into ComfyConfig (io/paths)
     - Otherwise, legacy single-file load (JSON or YAML with server/io/paths/env).
     - Expands models_root into category slots.
     - Writes a Comfy-shaped extra_model_paths.yaml from merged paths/custom_nodes.
-    - Provides:
-        * finalize() -> ComfyConfig
-        * build_runtime(cfg) -> RuntimeConfig
-        * debug_expanded_yaml_text(cfg)  (expanded ComfyConfig snapshot)
-        * debug_comfy_yaml_text(expand=...) (merged Comfy-side YAML)
-    """
-
-    """
-    Controller-aware configuration loader & builder.
-    ...
+    - Provides: finalize(), build_runtime(cfg), export_env_vars().
     """
 
     # ---- Singleton plumbing ----
@@ -268,9 +255,7 @@ class ConfigManager:
 
     # -------- controller helpers --------
     def _default_controller_path(self) -> Optional[Path]:
-        """
-        Fallback to ${PKG}/config/defaults/default.json if present.
-        """
+        """Fallback to ${PKG}/config/defaults/default.json if present."""
         here = Path(__file__).resolve()
         ctrl = here.parent / "defaults" / "default.json"
         return ctrl if ctrl.exists() else None
@@ -284,7 +269,7 @@ class ConfigManager:
         Use layering.py to merge Remote JSON layers and Comfy YAML layers,
         then map into ComfyConfig.
         """
-        # 1) Load controller (already expands ${PKG} and ${OS} inside 'path' fields)
+        # 1) Load controller (expands ${...} in 'path' fields)
         ctrl = load_controller(str(controller_path))
 
         # 2) Resolve actual JSON/YAML files and keep only those that exist
@@ -329,7 +314,7 @@ class ConfigManager:
             cfg.server.dont_print_server = bool(srv.get("dont_print_server", cfg.server.dont_print_server))
             cfg.server.extra_args = list(srv.get("extra_args", cfg.server.extra_args or [])) or []
 
-        # io (prefer YAML; that's your intent: IO belongs to Comfy side)
+        # io (prefer YAML; IO belongs to Comfy side)
         io = merged_comfy.get("io") or merged_remote.get("io") or {}
         if isinstance(io, dict):
             cfg.io.input_dir = str(io.get("input_dir", cfg.io.input_dir))
@@ -344,10 +329,8 @@ class ConfigManager:
             cfg.paths.home = str((jp.get("home") if isinstance(jp, dict) else None) or
                                  (yp.get("home") if isinstance(yp, dict) else "") or cfg.paths.home)
             cfg.paths.models_root = str((jp.get("models_root") if isinstance(jp, dict) else None) or
-                                        (yp.get("models_root") if isinstance(yp,
-                                                                             dict) else "") or cfg.paths.models_root)
+                                        (yp.get("models_root") if isinstance(yp, dict) else "") or cfg.paths.models_root)
 
-            # models map — normalize and union (JSON overrides by concatenation order)
             def _norm_models(d: Any) -> Dict[str, List[str]]:
                 out: Dict[str, List[str]] = {}
                 if isinstance(d, dict):
@@ -363,12 +346,10 @@ class ConfigManager:
             models_y = _norm_models(yp.get("models") if isinstance(yp, dict) else {})
             models_j = _norm_models(jp.get("models") if isinstance(jp, dict) else {})
             merged_models: Dict[str, List[str]] = {}
-            # YAML first, then JSON so JSON order/paths appear later (and we dedup later)
-            for src in (models_y, models_j):
+            for src in (models_y, models_j):  # YAML then JSON (JSON last-wins in dedup order)
                 for k, v in src.items():
                     merged_models.setdefault(k, [])
                     merged_models[k].extend(v)
-            # De-dup while preserving order
             for k, v in list(merged_models.items()):
                 merged_models[k] = _dedup_keep_order([_norm_path(x) for x in v if x])
 
@@ -397,9 +378,7 @@ class ConfigManager:
     # -------- legacy single-file loader --------
 
     def _load_single_file(self, p: Path) -> ComfyConfig:
-        """
-        Legacy path: load a single JSON or YAML file with server/io/paths/env.
-        """
+        """Legacy path: load a single JSON or YAML file with server/io/paths/env."""
         cfg = ComfyConfig()
         try:
             text = p.read_text(encoding="utf-8")
@@ -468,23 +447,18 @@ class ConfigManager:
         """
         Load config.
         Priority:
-          1) COMFY_CONFIG (env var). If it is a controller (has layers/yaml_layers),
-             perform layer merges. Otherwise treat as legacy single file.
-          2) Fallback to ${PKG}/config/defaults/default.json controller if present.
-          3) Else return defaults.
+          1) Default controller under package if present.
+          2) Else return defaults.
         """
-        cfg_path_env = self._default_controller_path()
-
-        if cfg_path_env:
-            p = Path(cfg_path_env)
+        cfg_path = self._default_controller_path()
+        if cfg_path:
+            p = Path(cfg_path)
             if p.exists():
-                # Try to determine if controller by content
+                # Determine if controller by content
                 try:
                     txt = p.read_text(encoding="utf-8")
-                    data: Dict[str, Any] = {}
-                    if p.suffix.lower() == ".json":
-                        data = json.loads(txt)
-                    else:
+                    data: Dict[str, Any] = json.loads(txt) if p.suffix.lower() == ".json" else {}
+                    if not data and p.suffix.lower() in (".yaml", ".yml"):
                         try:
                             import yaml  # type: ignore
                             data = yaml.safe_load(txt) or {}
@@ -495,73 +469,53 @@ class ConfigManager:
 
                 if self._is_controller_dict(data):
                     return self._load_via_controller(p)
-                # legacy single-file
                 return self._load_single_file(p)
-        # else:
-        # No COMFY_CONFIG or file missing: try default controller next
-        ctrl = self._default_controller_path()
-        if ctrl and ctrl.exists():
-            return self._load_via_controller(ctrl)
 
-        # Last resort: blank defaults
+        # fallback: blank defaults
         return ComfyConfig()
 
     def _resolve(self, cfg: ComfyConfig) -> ComfyConfig:
         """
         Resolve env vars and paths; choose port if needed; expand models map.
-        Expands:
-          - ${ENV:VAR} (manager's token style)
-          - $VAR / ${VAR} (shell style)
-          - ~            (home)
-        Expansion uses:  env_for_expand = os.environ + cfg.env
+        Expands ${ENV:VAR}, $VAR and ~ using env_for_expand = os.environ + cfg.env
         """
-
-        # Merge expansion environment: do NOT mutate os.environ
         env_for_expand = os.environ.copy()
         for k, v in (cfg.env or {}).items():
             env_for_expand[k] = str(v)
 
-        # Local normalizer that expands tokens and normalizes slashes
         def NX(s: str) -> str:
             if not s:
                 return s
             s2 = _expand_all_tokens(s, env_for_expand)
             return str(Path(s2)).replace("\\", "/")
 
-        # ---------------- host & port ----------------
-        cfg.server.host = _expand_all_tokens(cfg.server.host or "127.0.0.1", env_for_expand)
-        if not cfg.server.host:
-            cfg.server.host = "127.0.0.1"
-
+        # host/port
+        cfg.server.host = _expand_all_tokens(cfg.server.host or "127.0.0.1", env_for_expand) or "127.0.0.1"
         if not cfg.server.port or cfg.server.port == 0:
             cfg.server.port = _find_free_port()
-
-        # Optional: expand any tokens in extra args
         if cfg.server.extra_args:
             cfg.server.extra_args = [_expand_all_tokens(str(a), env_for_expand) for a in cfg.server.extra_args]
 
-        # ---------------- IO dirs (YAML side usually) ----------------
+        # IO
         cfg.io.input_dir = NX(cfg.io.input_dir)
         cfg.io.output_dir = NX(cfg.io.output_dir)
         cfg.io.temp_dir = NX(cfg.io.temp_dir)
         cfg.io.user_dir = NX(cfg.io.user_dir)
 
-        # ---------------- paths ----------------
+        # paths
         cfg.paths.home = NX(cfg.paths.home)
         cfg.paths.models_root = NX(cfg.paths.models_root)
 
-        # Normalize explicit per-category paths
         explicit: Dict[str, List[str]] = {}
         for k, v in (cfg.paths.models or {}).items():
             explicit[k] = [NX(x) for x in v]
         cfg.paths.models = explicit
-
         cfg.paths.custom_nodes = _dedup_keep_order([NX(x) for x in (cfg.paths.custom_nodes or [])])
 
-        # Expand models map with root (fills missing categories as <root>/models/<cat>)
+        # expand with root
         cfg.paths.models = _expand_models_with_root(cfg.paths.models_root, cfg.paths.models)
 
-        # ---------------- env values ----------------
+        # env values
         expanded_env: Dict[str, str] = {}
         for k, v in (cfg.env or {}).items():
             expanded_env[k] = _expand_all_tokens(str(v), env_for_expand)
@@ -574,7 +528,7 @@ class ConfigManager:
     def finalize(self) -> ComfyConfig:
         """
         Load and return a fully-resolved configuration snapshot.
-        If COMFY_CONFIG points to a controller, this performs both JSON/YAML merges.
+        If a controller is present, this performs both JSON/YAML merges.
         """
         raw = self.load()
         self.cfg = self._resolve(raw)
@@ -584,24 +538,22 @@ class ConfigManager:
     @classmethod
     def reload(cls) -> ComfyConfig:
         """Explicit re-merge of all layers with current environment."""
-        return cls.instance().reload()
+        mgr = cls.instance()
+        return mgr.finalize()
 
     def export_env_vars(
-            self,
-            *,
-            override: bool = False,
-            set_defaults: bool = True,
+        self,
+        *,
+        override: bool = False,
+        set_defaults: bool = True,
     ) -> Dict[str, str]:
         """
         Export environment variables for the ComfyUI child process.
 
         Precedence (low ➜ high):
           1) Computed defaults (COMFYUI_HOME, privacy toggles, optional HF caches)
-             — applied only if unset in the current process, unless override=True.
           2) Existing os.environ
-          3) cfg.env (your merged config) — ALWAYS wins last.
-
-        Returns a dict of the variables this method actively set/changed.
+          3) cfg.env (merged config) — ALWAYS wins last.
         """
         if not getattr(self, "cfg", None):
             self.finalize()
@@ -609,34 +561,29 @@ class ConfigManager:
 
         exported: Dict[str, str] = {}
 
-        # ---------- 1) computed defaults ----------
+        # 1) computed defaults
         defaults: Dict[str, str] = {}
-
-        # Always provide COMFYUI_HOME so ${ENV:COMFYUI_HOME} in YAML can be resolved.
         if cfg.paths.home:
             defaults["COMFYUI_HOME"] = _norm_path(cfg.paths.home)
 
-        # Privacy/telemetry + tokenizer parallelism (quiet & predictable by default).
         if set_defaults:
-            defaults.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")  # HF hub opt-out
+            defaults.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
             defaults.setdefault("DO_NOT_TRACK", "1")
             defaults.setdefault("TOKENIZERS_PARALLELISM", "false")
 
-        # Place HF caches under io.user_dir when available (keeps things tidy).
         if set_defaults and cfg.io.user_dir:
             hf_home = _join(cfg.io.user_dir, "hf")
             defaults.setdefault("HF_HOME", hf_home)
             defaults.setdefault("HUGGINGFACE_HUB_CACHE", _join(hf_home, "hub"))
             defaults.setdefault("TRANSFORMERS_CACHE", _join(hf_home, "transformers"))
 
-        # ---------- 2) apply computed defaults ----------
+        # 2) apply computed defaults
         for k, v in defaults.items():
             if override or k not in os.environ:
                 os.environ[k] = v
                 exported[k] = v
 
-        # ---------- 3) apply cfg.env (wins last) ----------
-        # Note: values in cfg.env may themselves contain $VAR / ~ etc.; expand once here.
+        # 3) apply cfg.env (wins last)
         for k, v in (cfg.env or {}).items():
             vv = os.path.expandvars(os.path.expanduser(str(v)))
             os.environ[k] = vv
@@ -646,8 +593,7 @@ class ConfigManager:
 
     def build_runtime(self, cfg: ComfyConfig) -> RuntimeConfig:
         """
-        Build argv/env for launching ComfyUI (matching main.py’s CLI),
-        and emit a Comfy-shaped extra_model_paths YAML if needed.
+        Build argv/env for launching ComfyUI and emit extra_model_paths YAML if needed.
         """
         argv: List[str] = [
             "--listen", cfg.server.host,
@@ -676,11 +622,9 @@ class ConfigManager:
 
         return RuntimeConfig(argv=argv, env=env, extra_paths_file=extra_yaml)
 
-    # Backward-compat helper used by some code paths
     def write_extra_paths_yaml_strings(self, cfg: ComfyConfig) -> Optional[str]:
         """
-        Emit a temporary YAML file that Comfy's `utils.extra_config.load_extra_path_config`
-        can parse (top-level `comfyui:` with categories and optional `custom_nodes`).
+        Emit a temporary YAML file that Comfy can parse (top-level `comfyui:`).
         Returns the file path, or None if there is nothing to write.
         """
         models_map = cfg.paths.models or {}
@@ -695,48 +639,98 @@ class ConfigManager:
         Path(tmp).write_text(text, encoding="utf-8")
         return tmp
 
-    # -------- Debug / Introspection helpers --------
+    # -------- Debug hook (new) --------
 
+    def debug(self) -> "ConfigManagerDebug":
+        """
+        Access debug/introspection helpers (moved out of the manager core).
+        """
+        return ConfigManagerDebug(self)
+
+    # -------- Backward compatibility shims (deprecated) --------
+    # These forward to the new debug helper to avoid breaking existing callers.
+
+    # DEPRECATED: use mgr.debug().expanded_snapshot(...)
     def debug_expanded_snapshot(self, cfg: Optional["ComfyConfig"] = None) -> Dict[str, Any]:
+        return self.debug().expanded_snapshot(cfg)
+
+    # DEPRECATED: use mgr.debug().expanded_yaml_text(...)
+    def debug_expanded_yaml_text(self, cfg: Optional["ComfyConfig"] = None) -> str:
+        return self.debug().expanded_yaml_text(cfg)
+
+    # DEPRECATED: use mgr.debug().get_comfy_yaml(...)
+    def debug_get_comfy_yaml(self, expand: bool = False) -> Dict[str, Any]:
+        return self.debug().get_comfy_yaml(expand=expand)
+
+    # DEPRECATED: use mgr.debug().comfy_yaml_text(...)
+    def debug_comfy_yaml_text(self, expand: bool = False) -> str:
+        return self.debug().comfy_yaml_text(expand=expand)
+
+    # DEPRECATED: use mgr.debug().controller_sources()
+    def debug_controller_sources(self) -> Dict[str, Any]:
+        return self.debug().controller_sources()
+
+
+# ----------------------- Debug companion -----------------------
+
+class ConfigManagerDebug:
+    """
+    Non-intrusive debug/introspection API for ConfigManager.
+
+    Usage:
+        mgr = ConfigManager()
+        dbg = mgr.debug()
+        print(dbg.comfy_yaml_text(expand=True))
+    """
+
+    def __init__(self, manager: ConfigManager) -> None:
+        self._mgr = manager
+
+    def expanded_snapshot(self, cfg: Optional["ComfyConfig"] = None) -> Dict[str, Any]:
         """
         Return a deep-expanded dict equivalent to cfg.to_dict(),
         where ${ENV:VAR}, $VAR and ~ are resolved using current os.environ.
         For printing only; does not affect runtime.
         """
-        cfg = cfg or self.finalize()
+        if cfg is None:
+            cfg = self._mgr.finalize()
         raw = cfg.to_dict()
         return _deep_expand_debug(raw, os.environ)
 
-    def debug_expanded_yaml_text(self, cfg: Optional["ComfyConfig"] = None) -> str:
+    def expanded_yaml_text(self, cfg: Optional["ComfyConfig"] = None) -> str:
         """
         Pretty YAML (or JSON fallback) of the expanded ComfyConfig snapshot.
         """
-        expanded = self.debug_expanded_snapshot(cfg)
+        expanded = self.expanded_snapshot(cfg)
         try:
             import yaml  # type: ignore
             return yaml.safe_dump(expanded, sort_keys=False)
         except Exception:
             return json.dumps(expanded, indent=2, ensure_ascii=False)
 
-    # Merged Comfy YAML (controller path only). Useful for debugging.
-    def debug_get_comfy_yaml(self, expand: bool = False) -> Dict[str, Any]:
-        y = dict(self._last_merged_comfy_yaml or {})
+    def get_comfy_yaml(self, expand: bool = False) -> Dict[str, Any]:
+        """
+        Merged Comfy-side YAML (controller stack only). Best-effort.
+        """
+        y = dict(self._mgr._last_merged_comfy_yaml or {})
         if expand:
             return _deep_expand_debug(y, os.environ)
         return y
 
-    def debug_comfy_yaml_text(self, expand: bool = False) -> str:
-        y = self.debug_get_comfy_yaml(expand=expand)
+    def comfy_yaml_text(self, expand: bool = False) -> str:
+        y = self.get_comfy_yaml(expand=expand)
         try:
             import yaml  # type: ignore
             return yaml.safe_dump(y, sort_keys=False)
         except Exception:
             return json.dumps(y, indent=2, ensure_ascii=False)
 
-    # Optional: expose which files were used
-    def debug_controller_sources(self) -> Dict[str, Any]:
+    def controller_sources(self) -> Dict[str, Any]:
+        """
+        Which files were merged by the controller (if used).
+        """
         return {
-            "controller": self._last_controller_path,
-            "json_layers": list(self._last_json_layer_files),
-            "yaml_layers": list(self._last_yaml_layer_files),
+            "controller": self._mgr._last_controller_path,
+            "json_layers": list(self._mgr._last_json_layer_files),
+            "yaml_layers": list(self._mgr._last_yaml_layer_files),
         }
